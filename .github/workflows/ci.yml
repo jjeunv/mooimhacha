@@ -45,7 +45,7 @@ jobs:
         run: npm test -- --passWithNoTests
 
   client:
-    name: client (Electron + Vite)
+    name: client (React + Vite)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,7 +67,6 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
-      # npm test는 pretest 훅으로 vite build --mode=test를 자동 실행하므로
-      # 별도 vite build 스텝은 생략 (전체 패키징 electron-builder는 release 워크플로우로 분리 권장)
+      # --passWithNoTests: 테스트 파일이 없어도 CI 통과
       - name: Test
         run: npm test
