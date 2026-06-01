@@ -74,6 +74,15 @@ export class AuthService {
     };
   }
 
+  getKakaoAuthUrl(): string {
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: this.config.get<string>('KAKAO_CLIENT_ID')!,
+      redirect_uri: this.config.get<string>('KAKAO_REDIRECT_URI')!,
+    });
+    return `https://kauth.kakao.com/oauth/authorize?${params.toString()}`;
+  }
+
   async updateProfile(userId: number, dto: UpdateProfileDto) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('사용자를 찾을 수 없습니다.');
