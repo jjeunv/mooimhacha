@@ -1,8 +1,20 @@
 import "@/styles/login.css";
 import { useNavigate } from "react-router-dom";
+import { fetchKakaoLoginUrl } from "@/lib/auth";
+import { useToast } from "@/hooks/useToast";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
+
+  // 백엔드에서 카카오 인가 URL을 받아 그쪽으로 이동시킨다.
+  async function handleKakaoLogin() {
+    try {
+      window.location.href = await fetchKakaoLoginUrl();
+    } catch {
+      showToast("카카오 로그인을 시작할 수 없습니다.");
+    }
+  }
 
   return (
     <div className="screen active" style={{ display: "flex", height: "100vh" }}>
@@ -83,11 +95,10 @@ export default function LoginPage() {
         <div className="lr-greet reveal" style={{ animationDelay: ".16s" }}>
           카카오 계정으로 간편하게 시작하세요.
         </div>
-        {/* 카카오 OAuth 미구현. 클릭 시 임시로 /home으로 이동. */}
         <button
           className="kakao-btn reveal"
           style={{ animationDelay: ".22s" }}
-          onClick={() => navigate("/home")}
+          onClick={handleKakaoLogin}
         >
           <svg width="19" height="19" viewBox="0 0 24 24" fill="#191919">
             <path d="M12 3C6.477 3 2 6.477 2 10.5c0 2.578 1.523 4.84 3.836 6.258-.168.594-.607 2.152-.695 2.484-.109.406.148.4.313.293.129-.086 2.047-1.395 2.875-1.957.527.074 1.07.113 1.621.113C16.523 17.691 22 14.214 22 10.5S17.523 3 12 3z" />

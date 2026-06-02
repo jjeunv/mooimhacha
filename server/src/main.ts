@@ -6,6 +6,9 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // 웹 클라이언트(다른 포트/오리진)에서의 API 호출 허용
+  app.enableCors({ origin: true, credentials: true });
+
   app.setGlobalPrefix('api');
 
   app.useGlobalPipes(

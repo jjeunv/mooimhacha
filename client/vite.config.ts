@@ -10,6 +10,7 @@ export default defineConfig({
   },
   plugins: [react()],
   server: {
-    port: 3000,
+    // 백엔드(localhost:3000)와 포트 충돌 방지
+    port: 5173,
   },
 });

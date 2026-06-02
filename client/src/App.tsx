@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "@/pages/login/LoginPage";
+import AuthCallback from "@/pages/login/AuthCallback";
 import OnboardingPage from "@/pages/onboarding/OnboardingPage";
 import HomePage from "@/pages/home/HomePage";
 import DashboardPage from "@/pages/dashboard/DashboardPage";
@@ -9,6 +10,7 @@ export default function App() {
     <div className="app">
       <Routes>
         <Route path="/" element={<LoginPage />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/home" element={<HomePage />} />
         <Route path="/dashboard/*" element={<DashboardPage />} />
