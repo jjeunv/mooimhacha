@@ -8,6 +8,7 @@ export default function OnboardingPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [step, setStep] = useState(0);
+  const [teamId, setTeamId] = useState(0);
   const [teamName, setTeamName] = useState("");
   const [selectedChip, setSelectedChip] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -46,6 +47,8 @@ export default function OnboardingPage() {
         }),
       });
       setInviteCode(data.invite_code);
+      setTeamId(data.id);
+      console.log(data);
       setStep(1);
     } catch (err) {
       showToast((err as Error).message || "팀 생성 실패");
@@ -299,7 +302,7 @@ export default function OnboardingPage() {
             <div className="ob-foot">
               <button
                 className="btn btn-primary btn-full"
-                onClick={() => navigate("/dashboard")}
+                onClick={() => navigate(`/dashboard/${teamId}`)}
               >
                 <i className="ti ti-rocket" /> 대시보드로 이동
               </button>
