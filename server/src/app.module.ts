@@ -3,11 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { TeamsModule } from './teams/teams.module';
-import { User } from './entities/user.entity';
-import { Team } from './entities/team.entity';
-import { TeamMembership } from './entities/team-membership.entity';
-import { TeamSettings } from './entities/team-settings.entity';
 import { ContributionModule } from './contribution/contribution.module';
+import { buildTypeOrmOptions } from './data-source';
 
 @Module({
   imports: [
@@ -15,17 +12,9 @@ import { ContributionModule } from './contribution/contribution.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
-        type: 'mysql',
-        host: config.get<string>('DB_HOST'),
-        port: config.get<number>('DB_PORT'),
-        username: config.get<string>('DB_USER'),
-        password: config.get<string>('DB_PASSWORD'),
-        database: config.get<string>('DB_NAME'),
-        entities: [User, Team, TeamMembership, TeamSettings],
+        // DB 옵션 단일 출처 — data-source.ts(마이그레이션 CLI)와 공유
+        ...buildTypeOrmOptions((key) => config.get<string>(key)),
         synchronize: config.get<string>('NODE_ENV') !== 'production',
-        timezone: '+09:00',
-        // 한글 등 멀티바이트 문자 깨짐(???) 방지
-        charset: 'utf8mb4',
       }),
       inject: [ConfigService],
     }),
