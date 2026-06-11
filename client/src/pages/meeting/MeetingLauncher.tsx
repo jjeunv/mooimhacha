@@ -51,7 +51,8 @@ export default function MeetingLauncher() {
 
   const loadTeams = useCallback(async () => {
     try {
-      const t = await apiGet<Team[]>("/teams");
+      // 서버(PR #6 계약)는 { teams: [...] } 형태로 반환한다
+      const t = (await apiGet<{ teams: Team[] }>("/teams")).teams;
       setTeams(t);
       if (!useTeamStore.getState().teamId && t[0]) setTeamId(t[0].id);
     } catch (e) {
