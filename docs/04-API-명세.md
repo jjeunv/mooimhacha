@@ -10,6 +10,16 @@
 | PATCH  | `/api/auth/profile` | 신규 가입자 대학교·학과 등록          |
 | POST   | `/api/auth/refresh` | refresh_token으로 access_token 재발급 |
 | POST   | `/api/auth/logout`  | 토큰 무효화                           |
+| DELETE | `/api/auth/me`      | 회원 탈퇴 — 익명화 + 전 팀 탈퇴       |
+
+회원 탈퇴 (`DELETE /api/auth/me`):
+
+- 행 내 익명화 방식 — `is_deleted=true`, 이름은 '탈퇴한 사용자'로, 카카오 식별자·이메일·프로필·학교 정보는 제거. soft delete(`deleted_at`)를 쓰지 않는 이유는 과거 리포트의 사용자 조인 보존 ([03](03-데이터-모델.md)).
+- 전 팀 멤버십 soft delete. 본인이 마지막 멤버였던 팀은 팀도 soft delete (회의·기여도 데이터는 보존).
+- 본인이 팀장인 팀에 다른 활성 멤버가 있으면 `409 Conflict` — 팀장 위임 후 탈퇴 가능.
+- 탈퇴한 계정의 잔여 토큰은 401 처리 (JWT 검증 시 `is_deleted` 확인).
+- 카카오 연결끊기는 `KAKAO_ADMIN_KEY` 설정 시에만 수행 (미설정이면 건너뛰고 탈퇴는 진행).
+- 응답: `{ "deleted": true }`
 
 ### 팀 / 멤버십 (Teams)
 
@@ -21,7 +31,20 @@
 | PATCH  | `/api/teams/:id`                 | 팀명·과목명 수정 (팀장만)    |
 | POST   | `/api/teams/join`                | 초대 코드로 합류             |
 | POST   | `/api/teams/:id/invite-code`     | 초대 코드 재발급 (팀장만)    |
+| PATCH  | `/api/teams/:id/leader`          | 팀장 위임 (팀장만)           |
+| DELETE | `/api/teams/:id/members/me`      | 팀 탈퇴 (본인)               |
 | DELETE | `/api/teams/:id/members/:userId` | 탈퇴 또는 추방               |
+
+팀장 위임 (`PATCH /api/teams/:id/leader`):
+
+- body: `{ "user_id": <팀장을 넘길 멤버의 user_id> }`
+- 본인에게 위임 시 400, 대상이 활성 멤버가 아니면 404. 성공 시 갱신된 팀 상세 반환.
+
+팀 탈퇴 (`DELETE /api/teams/:id/members/me`):
+
+- 팀장은 다른 활성 멤버가 있으면 `409 Conflict` — 위임 후 탈퇴 가능.
+- 마지막 1인이 나가면 팀도 soft delete (회의·기여도 데이터는 보존).
+- 응답: `{ "left": true }`
 
 ### 팀 설정 (Team Settings)
 
@@ -105,6 +128,11 @@
 | GET    | `/api/meetings/:id/contributions`             | ① 회의 참여자별 meeting_score (저장값) |
 | GET    | `/api/teams/:id/contributions`                | ②③④ 팀 멤버별 종합 기여도 (동적 계산)  |
 | POST   | `/api/meetings/:id/contributions/recalculate` | 회의 기여도(①) 강제 재계산 (팀장만)    |
+
+`GET /api/teams/:id/contributions` 응답의 `members[]`에 레이더 차트(출석·참여도 축)용 필드 포함:
+
+- `attendance_avg`, `speech_avg` (0~1 또는 null) — 산정에 포함된 회의(무효 처리·비정규 제외)의 ① 비율 단순 평균
+- 공개범위 제한으로 타인 점수가 마스킹되면 함께 null
 
 ### 사유 결석 (Meeting Absences) — P1
 
