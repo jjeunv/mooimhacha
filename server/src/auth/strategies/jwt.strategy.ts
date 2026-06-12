@@ -25,7 +25,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
     const user = await this.userRepo.findOne({ where: { id: payload.sub } });
-    if (!user) {
+    // 탈퇴(익명화)한 계정의 잔여 토큰 무효화
+    if (!user || user.is_deleted) {
       throw new UnauthorizedException();
     }
     return user;

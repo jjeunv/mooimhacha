@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Patch,
@@ -105,5 +106,13 @@ export class AuthController {
   @ApiOperation({ summary: '로그아웃' })
   logout() {
     return;
+  }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '회원 탈퇴 — 개인정보 익명화 + 전 팀 탈퇴' })
+  deleteMe(@Request() req: { user: User }) {
+    return this.authService.deleteAccount(req.user.id);
   }
 }
