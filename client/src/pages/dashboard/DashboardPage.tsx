@@ -12,6 +12,8 @@ import {
 import { useState, useEffect } from "react";
 import { getUser } from "@/lib/auth";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
+import { apiGet } from "@/lib/api";
+import type { ActionItem, Meeting } from "@/lib/types";
 import OverviewPage from "./overview/OverviewPage";
 import MeetingPage from "./meeting/MeetingPage";
 import TasksPage from "./tasks/TasksPage";
@@ -30,14 +32,8 @@ export interface TeamContext {
 
 const NAV_ITEMS = [
   { key: "overview", icon: "ti-layout-dashboard", label: "대시보드" },
-  {
-    key: "meeting",
-    icon: "ti-video",
-    label: "회의 관리",
-    badge: "LIVE",
-    badgeLive: true,
-  },
-  { key: "tasks", icon: "ti-checklist", label: "태스크", badge: "7" },
+  { key: "meeting", icon: "ti-video", label: "회의 관리" },
+  { key: "tasks", icon: "ti-checklist", label: "태스크" },
   { key: "report", icon: "ti-chart-bar", label: "기여도 리포트" },
   { key: "settings", icon: "ti-settings", label: "팀 설정" },
 ];
@@ -58,6 +54,9 @@ export default function DashboardPage() {
   const current = pathname.split("/")[3] || "overview";
   const currentUser = getUser();
   const [team, setTeam] = useState<TeamContext | null>(null);
+  // 사이드바 배지: 진행 중 회의가 있을 때만 LIVE, 미완료 태스크 수
+  const [hasLive, setHasLive] = useState(false);
+  const [openTaskCount, setOpenTaskCount] = useState(0);
 
   useEffect(() => {
     if (!teamId) return;
@@ -67,7 +66,27 @@ export default function DashboardPage() {
         if (found) setTeam(found);
       })
       .catch(() => {});
+    void Promise.allSettled([
+      apiGet<Meeting[]>(`/meetings?team_id=${teamId}`),
+      apiGet<ActionItem[]>(`/action-items?team_id=${teamId}`),
+    ]).then(([ms, ts]) => {
+      if (ms.status === "fulfilled")
+        setHasLive(ms.value.some((m) => m.status === "active"));
+      if (ts.status === "fulfilled")
+        setOpenTaskCount(
+          ts.value.filter(
+            (t) => t.status === "todo" || t.status === "in_progress",
+          ).length,
+        );
+    });
   }, [teamId]);
+
+  const badgeFor = (key: string): { text: string; live: boolean } | null => {
+    if (key === "meeting" && hasLive) return { text: "LIVE", live: true };
+    if (key === "tasks" && openTaskCount > 0)
+      return { text: String(openTaskCount), live: false };
+    return null;
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
@@ -88,21 +107,24 @@ export default function DashboardPage() {
         </div>
 
         <div className="sb-sec">메뉴</div>
-        {NAV_ITEMS.map((n) => (
-          <div
-            key={n.key}
-            className={`nav-item ${current === n.key ? "active" : ""}`}
-            onClick={() => navigate(`/dashboard/${teamId}/${n.key}`)}
-          >
-            <i className={`ti ${n.icon}`} />
-            {n.label}
-            {n.badge && (
-              <span className={`nbadge ${n.badgeLive ? "live" : ""}`}>
-                {n.badge}
-              </span>
-            )}
-          </div>
-        ))}
+        {NAV_ITEMS.map((n) => {
+          const badge = badgeFor(n.key);
+          return (
+            <div
+              key={n.key}
+              className={`nav-item ${current === n.key ? "active" : ""}`}
+              onClick={() => navigate(`/dashboard/${teamId}/${n.key}`)}
+            >
+              <i className={`ti ${n.icon}`} />
+              {n.label}
+              {badge && (
+                <span className={`nbadge ${badge.live ? "live" : ""}`}>
+                  {badge.text}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         <div className="sb-members">
           <div className="sb-sec">팀원</div>

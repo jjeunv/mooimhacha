@@ -1,9 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useOutletContext, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
+import { apiDelete, apiGet, apiPatch } from "@/lib/api";
+import { getUser } from "@/lib/auth";
+import { useTeamStore } from "@/stores/teamStore";
 import Card from "@/components/Card";
 import Modal from "@/components/Modal";
+import ConfirmModal from "@/components/ConfirmModal";
+import type { TeamContribution } from "@/lib/types";
 import type { TeamContext } from "../DashboardPage";
 
 interface TeamDetail {
@@ -37,6 +42,63 @@ export default function SettingsPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  // 멤버 관리 — 강퇴/위임/탈퇴
+  const me = getUser();
+  const [members, setMembers] = useState<TeamContribution[]>([]);
+  const [memberAction, setMemberAction] = useState<
+    | { kind: "kick"; target: TeamContribution }
+    | { kind: "transfer"; target: TeamContribution }
+    | { kind: "leave" }
+    | null
+  >(null);
+  const [actionBusy, setActionBusy] = useState(false);
+
+  const loadMembers = useCallback(() => {
+    if (!team) return;
+    apiGet<{ members: TeamContribution[] }>(`/teams/${team.id}/contributions`)
+      .then((d) =>
+        setMembers(
+          [...d.members].sort((a) => (a.role === "leader" ? -1 : 1)),
+        ),
+      )
+      .catch(() => {});
+  }, [team]);
+
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  async function runMemberAction() {
+    if (!team || !memberAction || actionBusy) return;
+    setActionBusy(true);
+    try {
+      if (memberAction.kind === "kick") {
+        await apiDelete(
+          `/teams/${team.id}/members/${memberAction.target.user_id}`,
+        );
+        showToast(`${memberAction.target.name}님을 내보냈습니다`);
+        setMemberAction(null);
+        loadMembers();
+      } else if (memberAction.kind === "transfer") {
+        await apiPatch(`/teams/${team.id}/leader`, {
+          user_id: memberAction.target.user_id,
+        });
+        showToast(`${memberAction.target.name}님이 새 팀장이 되었습니다`);
+        // 사이드바·설정 화면의 역할 표시를 한 번에 갱신하기 위해 전체 리로드
+        window.location.reload();
+      } else {
+        await apiDelete(`/teams/${team.id}/members/me`);
+        useTeamStore.getState().clearTeamId();
+        showToast("팀에서 나왔습니다");
+        navigate("/home");
+      }
+    } catch (err) {
+      showToast((err as Error).message, "error");
+      setMemberAction(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!team) return;
@@ -172,6 +234,78 @@ export default function SettingsPage() {
             >
               저장
             </button>
+          )}
+        </div>
+      </Card>
+
+      {/* 멤버 관리 */}
+      <Card icon="ti ti-users" title="멤버 관리">
+        <div style={{ padding: "8px 16px 16px" }}>
+          {members.map((m, i) => {
+            const isMe = me?.id === m.user_id;
+            return (
+              <div
+                key={m.user_id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 0",
+                  borderBottom:
+                    i < members.length - 1
+                      ? "1px solid var(--border)"
+                      : undefined,
+                }}
+              >
+                <div className={`av a${(i % 4) + 1} av-sm`}>{m.name[0]}</div>
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                  {m.name}
+                  {isMe && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-soft)",
+                        fontWeight: 400,
+                        marginLeft: 4,
+                      }}
+                    >
+                      나
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={`badge ${m.role === "leader" ? "b-green" : "b-gray"}`}
+                >
+                  {m.role === "leader" ? "팀장" : "팀원"}
+                </span>
+                <span style={{ flex: 1 }} />
+                {isLeader && !isMe && (
+                  <>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() =>
+                        setMemberAction({ kind: "transfer", target: m })
+                      }
+                    >
+                      <i className="ti ti-crown" /> 팀장 위임
+                    </button>
+                    <button
+                      className="btn btn-sm btn-danger"
+                      onClick={() =>
+                        setMemberAction({ kind: "kick", target: m })
+                      }
+                    >
+                      <i className="ti ti-user-minus" /> 내보내기
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {members.length === 0 && (
+            <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
+              멤버 정보를 불러오는 중입니다…
+            </div>
           )}
         </div>
       </Card>
@@ -374,6 +508,29 @@ export default function SettingsPage() {
           </div>
         </Card>
       )}
+      {/* 팀 탈퇴 — 본인 */}
+      <Card icon="ti ti-door-exit" title="팀 탈퇴">
+        <div style={{ padding: "8px 16px 16px" }}>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--text-soft)",
+              margin: "0 0 12px",
+            }}
+          >
+            {isLeader
+              ? "팀장은 다른 멤버에게 팀장을 위임한 뒤 나갈 수 있습니다."
+              : "팀에서 나가면 다시 합류할 때 초대코드가 필요합니다."}
+          </p>
+          <button
+            className="btn btn-danger"
+            onClick={() => setMemberAction({ kind: "leave" })}
+          >
+            <i className="ti ti-door-exit" /> 팀 나가기
+          </button>
+        </div>
+      </Card>
+
       {/* 팀 삭제 — 팀장만 */}
       {isLeader && (
         <Card icon="ti ti-trash" title="팀 삭제">
@@ -430,6 +587,55 @@ export default function SettingsPage() {
             </label>
           </div>
         </Modal>
+      )}
+
+      {/* 멤버 액션(강퇴·위임·탈퇴) 확인 모달 */}
+      {memberAction && (
+        <ConfirmModal
+          title={
+            memberAction.kind === "kick"
+              ? "멤버 내보내기"
+              : memberAction.kind === "transfer"
+                ? "팀장 위임"
+                : "팀 나가기"
+          }
+          message={
+            memberAction.kind === "kick" ? (
+              <>
+                <b>{memberAction.target.name}</b>님을 팀에서 내보낼까요?
+                <br />
+                과거 회의·기여도 기록은 보존됩니다.
+              </>
+            ) : memberAction.kind === "transfer" ? (
+              <>
+                <b>{memberAction.target.name}</b>님에게 팀장을 위임할까요?
+                <br />
+                나는 팀원으로 변경됩니다.
+              </>
+            ) : (
+              <>
+                정말 이 팀에서 나갈까요?
+                {isLeader && (
+                  <>
+                    <br />
+                    팀장은 먼저 다른 멤버에게 위임해야 나갈 수 있어요.
+                  </>
+                )}
+              </>
+            )
+          }
+          confirmLabel={
+            memberAction.kind === "kick"
+              ? "내보내기"
+              : memberAction.kind === "transfer"
+                ? "위임하기"
+                : "나가기"
+          }
+          danger={memberAction.kind !== "transfer"}
+          busy={actionBusy}
+          onConfirm={() => void runMemberAction()}
+          onClose={() => setMemberAction(null)}
+        />
       )}
     </div>
   );

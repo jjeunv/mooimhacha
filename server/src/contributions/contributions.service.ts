@@ -17,7 +17,7 @@ import { User } from '../entities/user.entity';
 import { TeamsService } from '../teams/teams.service';
 import { ContributionClient } from './contribution.client';
 import { LocalContributionScorer } from './contribution.scorer';
-import { TeamSettingsPayload } from './contribution.types';
+import { TeamPipelineRequest, TeamSettingsPayload } from './contribution.types';
 
 @Injectable()
 export class ContributionsService {
@@ -233,9 +233,19 @@ export class ContributionsService {
       })),
     };
 
-    // 외부 산정 서버 설정 시 위임, 아니면 로컬 스코어러(docs/06)로 ②③④ 동적 계산
+    // 외부 산정 서버 설정 시 기존 calculate 계약(/pipeline/score)으로 위임 — pipeline 은
+    // 저장된 ① 점수를 받지 못하므로 회의별 원시 이벤트를 다시 모아 보낸다.
+    // 미설정이면 로컬 스코어러(docs/06)가 저장된 ①(teamPayload) 기반으로 동적 계산.
     const response = this.client.configured
-      ? await this.client.computeTeamContributions(teamPayload)
+      ? await this.client.computeTeamContributions(
+          await this.buildPipelinePayload(
+            teamId,
+            settings,
+            teamPayload,
+            meetings,
+            memberships.filter((m) => !m.deleted_at).map((m) => m.user_id),
+          ),
+        )
       : this.scorer.computeTeamContributions(teamPayload);
 
     const names = await this.userNames(memberIds);
@@ -243,6 +253,20 @@ export class ContributionsService {
     const resultById = new Map(
       (response?.members ?? []).map((r) => [r.user_id, r]),
     );
+    // 레이더(출석·참여도 축) 표시용 — 누적 집계와 같은 제외 규칙
+    // (무효 처리·비정규 회의 제외)으로 저장된 ① 비율을 단순 평균한다.
+    const ratiosById = new Map<number, { att: number[]; sp: number[] }>();
+    for (const s of scores) {
+      const m = meetingById.get(s.meeting_id);
+      if (!m || m.is_invalidated || m.meeting_type !== 'regular') continue;
+      const slot = ratiosById.get(s.user_id) ?? { att: [], sp: [] };
+      if (s.attendance_ratio != null) slot.att.push(Number(s.attendance_ratio));
+      if (s.speech_ratio != null) slot.sp.push(Number(s.speech_ratio));
+      ratiosById.set(s.user_id, slot);
+    }
+    const avgOf = (arr: number[]) =>
+      arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
     // 공개범위: '전체 공개(team)'가 아니면 명단은 유지하되 타인 점수 상세는 가린다
     const canViewAll = await this.canViewAll(teamId, myMembership.role);
     return {
@@ -251,8 +275,8 @@ export class ContributionsService {
       // 클라이언트가 '비공개 마스킹'과 '미산정'을 구분해 안내할 수 있게 노출
       visibility_restricted: !canViewAll,
       members: memberIds.map((uid) => {
-        const r =
-          canViewAll || uid === userId ? resultById.get(uid) : undefined;
+        const masked = !(canViewAll || uid === userId);
+        const r = masked ? undefined : resultById.get(uid);
         return {
           user_id: uid,
           name: names.get(uid) ?? '알 수 없음',
@@ -260,6 +284,98 @@ export class ContributionsService {
           meeting_aggregate: r?.meeting_aggregate ?? null,
           task_score: r?.task_score ?? null,
           composite_score: r?.composite_score ?? null,
+          attendance_avg: masked ? null : avgOf(ratiosById.get(uid)?.att ?? []),
+          speech_avg: masked ? null : avgOf(ratiosById.get(uid)?.sp ?? []),
+        };
+      }),
+    };
+  }
+
+  // 외부 /pipeline/score 입력 — 팀 전체 회의의 원시 이벤트를 회의별로 묶어 구성한다.
+  // 외부 미설정 환경에서는 호출되지 않으므로 원시 로딩 비용은 외부 경로에서만 든다.
+  private async buildPipelinePayload(
+    teamId: number,
+    settings: TeamSettingsPayload,
+    teamPayload: {
+      members: TeamPipelineRequest['members'];
+      action_items: TeamPipelineRequest['action_items'];
+    },
+    meetings: Meeting[],
+    currentMemberIds: number[],
+  ): Promise<TeamPipelineRequest> {
+    const ids = meetings.map((m) => m.id);
+    const [utterances, presence, anomalies] =
+      ids.length > 0
+        ? await Promise.all([
+            // ① 산정 때와 동일하게 text 컬럼은 제외하고 로드
+            this.utteranceRepo.find({
+              where: { meeting_id: In(ids) },
+              select: {
+                meeting_id: true,
+                user_id: true,
+                char_count: true,
+                agenda_id: true,
+                confidence: true,
+              },
+            }),
+            this.presenceRepo.find({ where: { meeting_id: In(ids) } }),
+            this.anomalyRepo.find({ where: { meeting_id: In(ids) } }),
+          ])
+        : [[], [], []];
+
+    const groupByMeeting = <T extends { meeting_id: number }>(rows: T[]) => {
+      const map = new Map<number, T[]>();
+      for (const r of rows) {
+        const slot = map.get(r.meeting_id) ?? [];
+        slot.push(r);
+        map.set(r.meeting_id, slot);
+      }
+      return map;
+    };
+    const uttByMeeting = groupByMeeting(utterances);
+    const presByMeeting = groupByMeeting(presence);
+    const anomByMeeting = groupByMeeting(anomalies);
+
+    return {
+      team_id: teamId,
+      team_settings: settings,
+      members: teamPayload.members,
+      action_items: teamPayload.action_items,
+      meetings: meetings.map((m) => {
+        const pres = presByMeeting.get(m.id) ?? [];
+        // 참석자 규칙은 ① 저장 때와 동일: join 기록자, 없으면 현재 팀 멤버 전원
+        const joined = new Set(
+          pres.filter((p) => p.event_type === 'join').map((p) => p.user_id),
+        );
+        return {
+          meeting: {
+            id: m.id,
+            total_minutes: m.total_minutes,
+            t0_timestamp: m.t0_timestamp?.toISOString() ?? null,
+            ended_at: m.ended_at?.toISOString() ?? null,
+            meeting_type: m.meeting_type,
+          },
+          is_invalidated: m.is_invalidated,
+          team_settings: settings,
+          participant_user_ids:
+            joined.size > 0 ? [...joined] : currentMemberIds,
+          utterances: (uttByMeeting.get(m.id) ?? []).map((u) => ({
+            user_id: u.user_id,
+            char_count: u.char_count,
+            agenda_id: u.agenda_id,
+            confidence: u.confidence,
+          })),
+          presence_events: pres.map((p) => ({
+            user_id: p.user_id,
+            event_type: p.event_type,
+            disconnect_classification: p.disconnect_classification,
+            timestamp_offset_ms: p.timestamp_offset_ms,
+          })),
+          anomaly_events: (anomByMeeting.get(m.id) ?? []).map((a) => ({
+            user_id: a.user_id,
+            event_type: a.event_type,
+            timestamp_offset_ms: a.timestamp_offset_ms,
+          })),
         };
       }),
     };

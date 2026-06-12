@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import Card from "@/components/Card";
+import { apiGet } from "@/lib/api";
+import type { ActionItem, Meeting, TeamContribution } from "@/lib/types";
 import type { TeamContext } from "../DashboardPage";
 
 const MEMBER_COLORS = [
@@ -12,9 +14,112 @@ const MEMBER_COLORS = [
   "var(--text-soft)",
 ];
 
+// 마감일 표기: 오늘/내일은 강조, 그 외는 M/D
+function dueLabel(due: string | null): { text: string; color: string } | null {
+  if (!due) return null;
+  const d = new Date(due);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (diff < 0) return { text: "지남", color: "var(--coral)" };
+  if (diff === 0) return { text: "오늘", color: "var(--coral)" };
+  if (diff === 1) return { text: "내일", color: "var(--coral)" };
+  return {
+    text: `${d.getMonth() + 1}/${d.getDate()}`,
+    color: "var(--text-soft)",
+  };
+}
+
+function meetingDateLabel(m: Meeting): string {
+  const d = new Date(m.scheduled_at);
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString("ko-KR", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return sameDay ? `오늘 ${time}` : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
 export default function OverviewPage() {
   const navigate = useNavigate();
   const team = useOutletContext<TeamContext | null>();
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [contrib, setContrib] = useState<TeamContribution[]>([]);
+  const [tasks, setTasks] = useState<ActionItem[]>([]);
+
+  useEffect(() => {
+    if (!team) return;
+    let alive = true;
+    void Promise.allSettled([
+      apiGet<Meeting[]>(`/meetings?team_id=${team.id}`),
+      apiGet<{ members: TeamContribution[] }>(`/teams/${team.id}/contributions`),
+      apiGet<ActionItem[]>(`/action-items?team_id=${team.id}`),
+    ]).then(([ms, cs, ts]) => {
+      if (!alive) return;
+      if (ms.status === "fulfilled") setMeetings(ms.value);
+      if (cs.status === "fulfilled")
+        setContrib(
+          [...cs.value.members].sort(
+            (a, b) => (b.composite_score ?? -1) - (a.composite_score ?? -1),
+          ),
+        );
+      if (ts.status === "fulfilled") setTasks(ts.value);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [team]);
+
+  // 파생 값들 — 통계 카드·경보·목록이 공유
+  const derived = useMemo(() => {
+    const visible = tasks.filter((t) => t.status !== "cancelled");
+    const done = visible.filter((t) => t.status === "done");
+    const open = visible.filter((t) => t.status !== "done");
+    const nextDue = open
+      .filter((t) => t.due_date)
+      .sort(
+        (a, b) =>
+          new Date(a.due_date as string).getTime() -
+          new Date(b.due_date as string).getTime(),
+      )[0];
+    const freeRiders = contrib.filter(
+      (c) => c.composite_score != null && c.composite_score < 0.1,
+    );
+    // 경보: 오늘/내일 마감인데 미시작(todo) 태스크 — 담당자별 묶음의 첫 항목
+    const urgent = open.filter((t) => {
+      const d = dueLabel(t.due_date);
+      return t.status === "todo" && d && (d.text === "오늘" || d.text === "내일");
+    });
+    const nameById = new Map(contrib.map((c) => [c.user_id, c.name]));
+    const active = meetings.find((m) => m.status === "active");
+    const nextScheduled = [...meetings]
+      .filter((m) => m.status === "scheduled")
+      .sort(
+        (a, b) =>
+          new Date(a.scheduled_at).getTime() -
+          new Date(b.scheduled_at).getTime(),
+      )[0];
+    const recent = [...meetings]
+      .sort(
+        (a, b) =>
+          new Date(b.scheduled_at).getTime() -
+          new Date(a.scheduled_at).getTime(),
+      )
+      .slice(0, 3);
+    return {
+      visible,
+      done,
+      open,
+      nextDue,
+      freeRiders,
+      urgent,
+      nameById,
+      active,
+      nextScheduled,
+      recent,
+    };
+  }, [tasks, contrib, meetings]);
 
   // requestAnimationFrame으로 지연 적용: 마운트 직후 0% → data-w% 로 CSS transition 애니메이션.
   // 동기 적용하면 브라우저가 초기값과 최종값을 합쳐 렌더링해 transition이 발동하지 않음.
@@ -31,31 +136,63 @@ export default function OverviewPage() {
           b.style.width = b.dataset.w + "%";
         });
     });
-  }, []);
+  }, [contrib]);
+
+  const taskPct = derived.visible.length
+    ? Math.round((derived.done.length / derived.visible.length) * 100)
+    : 0;
+  const nextDueInfo = derived.nextDue ? dueLabel(derived.nextDue.due_date) : null;
+  const focusMeeting = derived.active ?? derived.nextScheduled;
 
   return (
     <div>
-      <div className="alert-bar">
-        <i className="ti ti-alert-triangle" /> 박지호님의 태스크 2개가 내일
-        마감입니다. 아직 시작하지 않았어요.
-      </div>
+      {derived.urgent.length > 0 ? (
+        <div className="alert-bar">
+          <i className="ti ti-alert-triangle" />{" "}
+          {derived.nameById.get(derived.urgent[0].assignee_id ?? -1) ??
+            "담당자 미지정"}
+          님의 태스크 {derived.urgent.length}개가 곧 마감입니다. 아직 시작하지
+          않았어요.
+        </div>
+      ) : derived.freeRiders.length > 0 ? (
+        <div className="alert-bar">
+          <i className="ti ti-alert-triangle" /> {derived.freeRiders[0].name}
+          님의 기여도가 10% 미만입니다. 역할 분배를 점검해 보세요.
+        </div>
+      ) : null}
 
       {/* 통계 */}
       <div className="stats-grid">
         {[
-          { lbl: "총 회의", val: "3", sub: "이번 프로젝트" },
-          { lbl: "태스크 진행률", val: "64%", sub: "7 / 11 완료" },
+          {
+            lbl: "총 회의",
+            val: String(meetings.length),
+            sub: "이번 프로젝트",
+          },
+          {
+            lbl: "태스크 진행률",
+            val: `${taskPct}%`,
+            sub: `${derived.done.length} / ${derived.visible.length} 완료`,
+          },
           {
             lbl: "다음 마감",
-            val: "내일",
-            sub: "발표 슬라이드 초안",
-            valStyle: { fontSize: 20, paddingTop: 8 },
+            val: nextDueInfo?.text ?? "—",
+            sub: derived.nextDue?.description ?? "예정된 마감 없음",
+            valStyle: { fontSize: 20, paddingTop: 8 } as const,
           },
           {
             lbl: "무임승차 경보",
-            val: "1명",
-            sub: "박지호 · 기여도 8%",
-            valStyle: { color: "var(--coral)" },
+            val: `${derived.freeRiders.length}명`,
+            sub: derived.freeRiders[0]
+              ? `${derived.freeRiders[0].name} · 기여도 ${Math.round(
+                  (derived.freeRiders[0].composite_score ?? 0) * 100,
+                )}%`
+              : "이상 없음",
+            valStyle: {
+              color: derived.freeRiders.length
+                ? "var(--coral)"
+                : undefined,
+            } as const,
           },
         ].map((s) => (
           <div key={s.lbl} className="stat-card">
@@ -79,25 +216,46 @@ export default function OverviewPage() {
           extra={<span className="badge b-green">실시간</span>}
         >
           <div style={{ padding: "2px 18px 14px" }}>
-            {(team?.members ?? []).map((name, i) => (
-              <div key={i} className="contrib-row">
-                <span className="c-name">{name}</span>
-                <span className="c-bar">
-                  <i
-                    style={{
-                      width: 0,
-                      background: MEMBER_COLORS[i % MEMBER_COLORS.length],
-                    }}
-                  />
-                </span>
-                <span className="c-pct" style={{ color: "var(--text-soft)" }}>
-                  -%
-                </span>
-                <span className="c-task" style={{ color: "var(--text-soft)" }}>
-                  -
-                </span>
+            {contrib.length === 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
+                아직 산정된 기여도가 없습니다. 회의를 진행하면 집계돼요.
               </div>
-            ))}
+            )}
+            {contrib.map((c, i) => {
+              const pct =
+                c.composite_score == null
+                  ? null
+                  : Math.round(c.composite_score * 100);
+              const myTasks = derived.visible.filter(
+                (t) => t.assignee_id === c.user_id,
+              );
+              const myDone = myTasks.filter((t) => t.status === "done");
+              return (
+                <div key={c.user_id} className="contrib-row">
+                  <span className="c-name">{c.name}</span>
+                  <span className="c-bar">
+                    <i
+                      data-w={pct ?? 0}
+                      style={{
+                        width: 0,
+                        background: MEMBER_COLORS[i % MEMBER_COLORS.length],
+                      }}
+                    />
+                  </span>
+                  <span
+                    className="c-pct"
+                    style={pct == null ? { color: "var(--text-soft)" } : undefined}
+                  >
+                    {pct == null ? "-%" : `${pct}%`}
+                  </span>
+                  <span className="c-task" style={{ color: "var(--text-soft)" }}>
+                    {myTasks.length
+                      ? `태스크 ${myDone.length}/${myTasks.length}`
+                      : "-"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </Card>
 
@@ -108,27 +266,34 @@ export default function OverviewPage() {
             <span className="card-title">
               <i className="ti ti-clock" /> 진행 중 회의
             </span>
-            <span className="spill spill-live">🔴 진행</span>
+            {derived.active ? (
+              <span className="spill spill-live">🔴 진행</span>
+            ) : (
+              <span className="badge">예정</span>
+            )}
           </div>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 3 }}>
-            발표 준비 회의
+            {focusMeeting?.topic ?? (focusMeeting ? "제목 없는 회의" : "예정된 회의 없음")}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-soft)" }}>
-            오늘 오후 3:00 · 아젠다 3개 · 4명 참석
+            {focusMeeting
+              ? `${meetingDateLabel(focusMeeting)} · ${focusMeeting.total_minutes}분 · ${team?.member_count ?? "-"}명`
+              : "회의 관리에서 새 회의를 만들어 보세요."}
           </div>
           <div style={{ display: "flex", gap: 7, margin: "14px 0 4px" }}>
-            {["a1", "a2", "a3", "a4"].map((cls, i) => (
-              <div key={i} className={`av ${cls} av-sm`}>
-                {["김", "이", "박", "최"][i]}
+            {(team?.members ?? []).slice(0, 4).map((name, i) => (
+              <div key={i} className={`av a${(i % 4) + 1} av-sm`}>
+                {name[0]}
               </div>
             ))}
           </div>
           <button
             className="btn btn-primary btn-full"
             style={{ marginTop: 12 }}
-            onClick={() => navigate("/dashboard/meeting")}
+            onClick={() => navigate(`/dashboard/${team?.id}/meeting`)}
           >
-            <i className="ti ti-arrow-right" /> 회의 참여하기
+            <i className="ti ti-arrow-right" />{" "}
+            {derived.active ? "회의 참여하기" : "회의 관리로 이동"}
           </button>
         </div>
       </div>
@@ -137,95 +302,65 @@ export default function OverviewPage() {
         {/* 진행 중 태스크 */}
         <Card icon="ti ti-checklist" title="진행 중 태스크">
           <div style={{ padding: "2px 16px 14px" }}>
-            {[
-              {
-                done: true,
-                name: "시장 조사 보고서",
-                who: "민준",
-                due: undefined,
-              },
-              {
-                done: false,
-                name: "UI 와이어프레임",
-                who: "",
-                due: "내일",
-                dueColor: "var(--coral)",
-              },
-              {
-                done: false,
-                name: "발표 슬라이드 초안",
-                who: "",
-                due: "내일",
-                dueColor: "var(--coral)",
-              },
-              {
-                done: false,
-                name: "기술 스택 문서화",
-                who: "",
-                due: "5/12",
-                dueColor: "var(--text-soft)",
-              },
-            ].map((t, i) => (
-              <div key={i} className="task-mini">
-                <div className={`chk-mini ${t.done ? "done" : ""}`}>
-                  {t.done && <i className="ti ti-check" />}
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    textDecoration: t.done ? "line-through" : undefined,
-                    color: t.done ? "var(--text-soft)" : undefined,
-                  }}
-                >
-                  {t.name}
-                </div>
-                {t.due && (
-                  <span style={{ color: t.dueColor, fontWeight: 700 }}>
-                    {t.due}
-                  </span>
-                )}
-                {t.who && (
-                  <span style={{ color: "var(--text-soft)" }}>{t.who}</span>
-                )}
+            {derived.visible.length === 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
+                등록된 태스크가 없습니다.
               </div>
-            ))}
+            )}
+            {[...derived.open, ...derived.done].slice(0, 4).map((t) => {
+              const due = dueLabel(t.due_date);
+              const done = t.status === "done";
+              return (
+                <div key={t.id} className="task-mini">
+                  <div className={`chk-mini ${done ? "done" : ""}`}>
+                    {done && <i className="ti ti-check" />}
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      textDecoration: done ? "line-through" : undefined,
+                      color: done ? "var(--text-soft)" : undefined,
+                    }}
+                  >
+                    {t.description}
+                  </div>
+                  {!done && due && (
+                    <span style={{ color: due.color, fontWeight: 700 }}>
+                      {due.text}
+                    </span>
+                  )}
+                  <span style={{ color: "var(--text-soft)" }}>
+                    {derived.nameById.get(t.assignee_id ?? -1) ?? ""}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </Card>
 
         {/* 최근 회의 */}
         <Card icon="ti ti-calendar" title="최근 회의">
           <div style={{ padding: "2px 16px 14px" }}>
-            {[
-              {
-                name: "킥오프 회의",
-                badge: "b-green",
-                status: "완료",
-                meta: "5월 1일 · 38분",
-              },
-              {
-                name: "중간 점검",
-                badge: "b-green",
-                status: "완료",
-                meta: "5월 5일 · 52분",
-              },
-              {
-                name: "발표 준비 회의",
-                badge: undefined,
-                status: "진행 중",
-                meta: "오늘 오후 3시",
-                spill: true,
-              },
-            ].map((m) => (
-              <div key={m.name} className="meeting-mini">
+            {derived.recent.length === 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
+                아직 회의 기록이 없습니다.
+              </div>
+            )}
+            {derived.recent.map((m) => (
+              <div key={m.id} className="meeting-mini">
                 <div className="mm-top">
-                  <span>{m.name}</span>
-                  {m.spill ? (
-                    <span className="spill spill-live">{m.status}</span>
+                  <span>{m.topic ?? "제목 없는 회의"}</span>
+                  {m.status === "active" ? (
+                    <span className="spill spill-live">진행 중</span>
+                  ) : m.status === "ended" ? (
+                    <span className="badge b-green">완료</span>
                   ) : (
-                    <span className={`badge ${m.badge}`}>{m.status}</span>
+                    <span className="badge">예정</span>
                   )}
                 </div>
-                <div className="mm-meta">{m.meta}</div>
+                <div className="mm-meta">
+                  {meetingDateLabel(m)} · {m.total_minutes}분
+                </div>
               </div>
             ))}
           </div>

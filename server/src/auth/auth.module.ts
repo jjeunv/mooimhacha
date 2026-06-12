@@ -8,10 +8,12 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { User } from '../entities/user.entity';
+import { Team } from '../entities/team.entity';
+import { TeamMembership } from '../entities/team-membership.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Team, TeamMembership]),
     PassportModule,
     JwtModule.register({}),
     ConfigModule,

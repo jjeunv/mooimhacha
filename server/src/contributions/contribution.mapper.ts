@@ -1,11 +1,11 @@
 import {
-  MeetingScoreRequest,
-  MeetingScoreResult,
+  MeetingRawInput,
   TeamContributionRequest,
   TeamSettingsPayload,
 } from './contribution.types';
 
 // 외부 기여도 산정 API(cc-team-8/Contribution)와 주고받는 타입 + 순수 변환 함수.
+// 기존 calculate(server/src/contribution)와 동일하게 /pipeline/score 단일 엔드포인트만 쓴다.
 // 외부 API는 멤버 1명 단위 호출이며 식별자가 name(str)이라 user_id 를 문자열로 변환해 보낸다.
 // 점수 스케일은 양쪽 모두 0~1.
 
@@ -38,31 +38,8 @@ export interface ExternalMemberMeetingData {
   excused_absence: boolean;
   absent: boolean;
   is_official: boolean;
-}
-
-export interface ExternalMeetingScoreResponse {
-  name: string;
-  meeting_id: string;
-  meeting_total_sec: number;
-  speech_score: number | null;
-  attend_score: number | null;
-  meeting_contribution: number;
-  reliability: string;
-  low_attend_flag: boolean;
-  weights_used: Record<string, number>;
-  is_official: boolean;
-  excused_absence: boolean;
-  absent: boolean;
-}
-
-export interface ExternalMeetingScoreItem {
-  name: string;
-  meeting_id: string;
-  meeting_total_sec: number;
-  meeting_contribution: number;
-  is_official: boolean;
-  excused_absence: boolean;
-  absent: boolean;
+  // ③ 테스크 입력 — pipeline 은 회의 행에 동봉된 액션을 모아(collect_actions) 계산한다
+  actions?: ExternalActionItem[];
 }
 
 export interface ExternalActionItem {
@@ -95,6 +72,14 @@ export interface ExternalFinalScoreResponse {
   leader_applied: boolean;
 }
 
+// /pipeline/score 응답 — meeting 은 보낸 회의들의 누적(②) 결과
+export interface ExternalFullPipelineResponse {
+  name: string;
+  meeting: ExternalCumulativeScoreResponse;
+  task: ExternalTaskScoreResponse;
+  final: ExternalFinalScoreResponse;
+}
+
 // --- 변환 함수 ---
 
 // 우리 팀 설정 → 외부 설정. 발언/참석 가중치는 docs/06 기준 0.6/0.4 를 명시 전달한다
@@ -116,7 +101,7 @@ export function mapTeamSettings(s: TeamSettingsPayload): ExternalTeamSettings {
 }
 
 // 실측 진행시간(ms) — ended_at−t0, 없으면 total_minutes 환산 (scorer 와 동일 공식)
-function meetingDurationMs(m: MeetingScoreRequest['meeting']): number {
+function meetingDurationMs(m: MeetingRawInput['meeting']): number {
   if (m.t0_timestamp && m.ended_at) {
     const d =
       new Date(m.ended_at).getTime() - new Date(m.t0_timestamp).getTime();
@@ -125,10 +110,10 @@ function meetingDurationMs(m: MeetingScoreRequest['meeting']): number {
   return Math.max(0, (m.total_minutes ?? 0) * 60000);
 }
 
-// 한 참여자의 원시 이벤트를 외부 /meeting/score 입력(파생 지표)으로 변환.
+// 한 참여자의 원시 이벤트를 외부 MemberMeetingData(파생 지표)로 변환.
 // rawSpeechRatio(own/total)는 UI 발언 비중 바 저장용 — 외부 speech_score 는 1/N 정규화 점수라 별개.
 export function deriveMemberData(
-  req: MeetingScoreRequest,
+  req: MeetingRawInput,
   userId: number,
 ): { data: ExternalMemberMeetingData; rawSpeechRatio: number | null } {
   const s = req.team_settings;
@@ -231,48 +216,9 @@ export function deriveMemberData(
   };
 }
 
-// 외부 /meeting/score 응답 → 우리 MeetingScoreResult.
-// speech_consistency·punctuality_score 는 외부 미제공 → null (UI 미표시 필드).
-export function mapMeetingResult(
-  userId: number,
-  ext: ExternalMeetingScoreResponse,
-  rawSpeechRatio: number | null,
-): MeetingScoreResult {
-  return {
-    user_id: userId,
-    speech_ratio: rawSpeechRatio,
-    speech_consistency: null,
-    attendance_ratio: ext.attend_score,
-    punctuality_score: null,
-    meeting_score: ext.meeting_contribution,
-    confidence_level: ext.reliability ? ext.reliability.toLowerCase() : null,
-    excluded_indicators: ext.low_attend_flag ? ['low_attendance'] : null,
-  };
-}
-
-// 저장된 ① 행 → 외부 /cumulative/score 입력.
-// 점수 미산정(null) 회의는 absent+excused_absence 로 보내 누적에서 제외시킨다
-// (로컬 스코어러의 "측정 불가 행 제외"와 동치).
-export function toCumulativeItems(
-  req: TeamContributionRequest,
-  userId: number,
-): ExternalMeetingScoreItem[] {
-  return req.meeting_scores
-    .filter((r) => r.user_id === userId)
-    .map((r) => ({
-      name: String(userId),
-      meeting_id: String(r.meeting_id),
-      meeting_total_sec: r.actual_minutes * 60,
-      meeting_contribution: r.meeting_score ?? 0,
-      is_official: r.meeting_type === 'regular' && !r.is_invalidated,
-      excused_absence: r.meeting_score == null,
-      absent: r.meeting_score == null,
-    }));
-}
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// 액션 아이템 → 외부 /task/score 입력. 분모 정책은 로컬 스코어러와 동일:
+// 액션 아이템 → 외부 ActionItem(③ 테스크 입력). 분모 정책은 로컬 스코어러와 동일:
 // done(완료)·cancelled(무단 취소)·기한 경과 미완료만 전달(분모 포함), 기한 전 미완료는 평가 보류로 제외.
 export function toTaskActions(
   actions: TeamContributionRequest['action_items'],

@@ -33,6 +33,11 @@ export class User {
   @Column({ type: 'boolean', default: false })
   email_opt_out!: boolean;
 
+  // 탈퇴는 행 내 익명화 방식(이름·카카오 식별자 제거) — deleted_at을 쓰면
+  // TypeORM soft-delete 필터가 과거 리포트의 사용자 조인을 null로 만들기 때문.
+  @Column({ type: 'boolean', default: false })
+  is_deleted!: boolean;
+
   @CreateDateColumn()
   created_at!: Date;
 

@@ -1,15 +1,9 @@
 import {
   deriveMemberData,
-  mapMeetingResult,
   mapTeamSettings,
-  toCumulativeItems,
   toTaskActions,
 } from './contribution.mapper';
-import {
-  MeetingScoreRequest,
-  TeamContributionRequest,
-  TeamSettingsPayload,
-} from './contribution.types';
+import { MeetingScoreRequest, TeamSettingsPayload } from './contribution.types';
 
 const SETTINGS: TeamSettingsPayload = {
   punctuality_grace_ratio: 0.1,
@@ -200,137 +194,6 @@ describe('deriveMemberData — 원시 이벤트 → 외부 MemberMeetingData', (
       presence_events: [join(1, 0)],
     });
     expect(deriveMemberData(req, 1).data.is_official).toBe(false);
-  });
-});
-
-describe('mapMeetingResult — 외부 응답 → 우리 MeetingScoreResult', () => {
-  const ext = {
-    name: '1',
-    meeting_id: '7',
-    meeting_total_sec: 3600,
-    speech_score: 0.8,
-    attend_score: 0.95,
-    meeting_contribution: 0.86,
-    reliability: 'High',
-    low_attend_flag: false,
-    weights_used: { speech: 0.6, attend: 0.4 },
-    is_official: true,
-    excused_absence: false,
-    absent: false,
-  };
-
-  it('필드 매핑: contribution→meeting_score, attend→attendance_ratio, 소문자 reliability', () => {
-    expect(mapMeetingResult(1, ext, 0.42)).toEqual({
-      user_id: 1,
-      speech_ratio: 0.42, // 어댑터가 계산한 원시 비율
-      speech_consistency: null,
-      attendance_ratio: 0.95,
-      punctuality_score: null,
-      meeting_score: 0.86,
-      confidence_level: 'high',
-      excluded_indicators: null,
-    });
-  });
-
-  it('low_attend_flag → excluded_indicators 표기', () => {
-    const r = mapMeetingResult(1, { ...ext, low_attend_flag: true }, null);
-    expect(r.excluded_indicators).toEqual(['low_attendance']);
-  });
-
-  it('결석 응답(reliability=Absent) → confidence_level=absent', () => {
-    const r = mapMeetingResult(
-      1,
-      {
-        ...ext,
-        speech_score: null,
-        attend_score: null,
-        meeting_contribution: 0,
-        reliability: 'Absent',
-        low_attend_flag: true,
-      },
-      null,
-    );
-    expect(r.confidence_level).toBe('absent');
-    expect(r.meeting_score).toBe(0);
-  });
-});
-
-describe('toCumulativeItems — 저장된 ① → 외부 /cumulative 입력', () => {
-  const teamReq = {
-    team_id: 1,
-    team_settings: SETTINGS,
-    members: [{ user_id: 1, role: 'member' }],
-    meeting_scores: [
-      {
-        user_id: 1,
-        meeting_id: 10,
-        meeting_score: 0.8,
-        total_minutes: 60,
-        actual_minutes: 50,
-        meeting_type: 'regular',
-        is_invalidated: false,
-      },
-      {
-        user_id: 1,
-        meeting_id: 11,
-        meeting_score: null, // 점수 미산정
-        total_minutes: 30,
-        actual_minutes: 30,
-        meeting_type: 'regular',
-        is_invalidated: false,
-      },
-      {
-        user_id: 1,
-        meeting_id: 12,
-        meeting_score: 0.5,
-        total_minutes: 30,
-        actual_minutes: 30,
-        meeting_type: 'regular',
-        is_invalidated: true, // 무효 처리된 회의
-      },
-      {
-        user_id: 2, // 다른 사용자 — 제외
-        meeting_id: 10,
-        meeting_score: 0.9,
-        total_minutes: 60,
-        actual_minutes: 50,
-        meeting_type: 'regular',
-        is_invalidated: false,
-      },
-    ],
-    action_items: [],
-  } as TeamContributionRequest;
-
-  it('본인 행만, 실측 분→초 변환, null 점수는 absent+excused(누적 제외), 무효 회의는 is_official=false', () => {
-    expect(toCumulativeItems(teamReq, 1)).toEqual([
-      {
-        name: '1',
-        meeting_id: '10',
-        meeting_total_sec: 3000, // actual_minutes 50 × 60
-        meeting_contribution: 0.8,
-        is_official: true,
-        excused_absence: false,
-        absent: false,
-      },
-      {
-        name: '1',
-        meeting_id: '11',
-        meeting_total_sec: 1800,
-        meeting_contribution: 0,
-        is_official: true,
-        excused_absence: true, // absent+excused → 엔진이 누적에서 제외
-        absent: true,
-      },
-      {
-        name: '1',
-        meeting_id: '12',
-        meeting_total_sec: 1800,
-        meeting_contribution: 0.5,
-        is_official: false, // is_invalidated → 엔진이 필터
-        excused_absence: false,
-        absent: false,
-      },
-    ]);
   });
 });
 

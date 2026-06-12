@@ -1,13 +1,16 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { User } from '../entities/user.entity';
+import { Team } from '../entities/team.entity';
+import { TeamMembership } from '../entities/team-membership.entity';
 import { KakaoLoginDto } from './dto/kakao-login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -34,8 +37,11 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(TeamMembership)
+    private membershipRepo: Repository<TeamMembership>,
     private jwtService: JwtService,
     private config: ConfigService,
+    private dataSource: DataSource,
   ) {}
 
   async kakaoLogin(dto: KakaoLoginDto) {
@@ -171,5 +177,89 @@ export class AuthService {
     }
 
     return res.json() as Promise<KakaoUserInfo>;
+  }
+
+  // 회원 탈퇴 — 행 내 익명화 + 전 팀 탈퇴 (기여도 기록은 익명으로 보존)
+  async deleteAccount(userId: number) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user || user.is_deleted) {
+      throw new NotFoundException('사용자를 찾을 수 없습니다.');
+    }
+
+    const memberships = await this.membershipRepo.find({
+      where: { user_id: userId, deleted_at: IsNull() },
+    });
+
+    // 본인이 팀장인 팀에 다른 활성 멤버가 있으면 위임을 먼저 요구
+    for (const m of memberships) {
+      if (m.role !== 'leader') continue;
+      const count = await this.membershipRepo.count({
+        where: { team_id: m.team_id, deleted_at: IsNull() },
+      });
+      if (count > 1) {
+        throw new ConflictException('팀장을 넘긴 뒤 탈퇴할 수 있어요.');
+      }
+    }
+
+    const kakaoId = user.kakao_id;
+
+    await this.dataSource.transaction(async (manager) => {
+      // 전 멤버십 soft delete + 본인이 마지막 멤버였던 팀은 팀도 정리
+      for (const m of memberships) {
+        const count = await manager.count(TeamMembership, {
+          where: { team_id: m.team_id, deleted_at: IsNull() },
+        });
+        await manager.softRemove(m);
+        if (count === 1) {
+          const team = await manager.findOne(Team, {
+            where: { id: m.team_id },
+          });
+          if (team) await manager.softRemove(team);
+        }
+      }
+
+      // 행 내 익명화 — deleted_at은 설정하지 않는다.
+      // (soft-delete 필터가 과거 리포트의 사용자 조인을 깨뜨리기 때문)
+      user.is_deleted = true;
+      user.name = '탈퇴한 사용자';
+      user.kakao_id = `deleted:${user.id}`;
+      user.kakao_email = null;
+      user.profile_image_url = null;
+      user.university = null;
+      user.department = null;
+      await manager.save(user);
+    });
+
+    await this.unlinkKakao(kakaoId);
+    return { deleted: true };
+  }
+
+  // 카카오 앱 연결 끊기 — KAKAO_ADMIN_KEY 미설정 시 건너뜀 (탈퇴 자체는 진행)
+  private async unlinkKakao(kakaoId: string) {
+    const adminKey = this.config.get<string>('KAKAO_ADMIN_KEY');
+    if (!adminKey) {
+      console.warn(
+        '[Kakao unlink] KAKAO_ADMIN_KEY가 설정되지 않아 연결끊기를 건너뜁니다.',
+      );
+      return;
+    }
+    try {
+      const res = await fetch('https://kapi.kakao.com/v1/user/unlink', {
+        method: 'POST',
+        headers: {
+          Authorization: `KakaoAK ${adminKey}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          target_id_type: 'user_id',
+          target_id: kakaoId,
+        }).toString(),
+      });
+      if (!res.ok) {
+        console.warn('[Kakao unlink] 실패:', res.status, await res.text());
+      }
+    } catch (err) {
+      console.warn('[Kakao unlink] 호출 오류:', err);
+    }
   }
 }

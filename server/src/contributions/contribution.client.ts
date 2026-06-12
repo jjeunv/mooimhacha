@@ -7,23 +7,22 @@ import { ConfigService } from '@nestjs/config';
 import {
   MeetingScoreRequest,
   MeetingScoreResponse,
-  TeamContributionRequest,
   TeamContributionResponse,
+  TeamPipelineRequest,
 } from './contribution.types';
 import {
-  ExternalCumulativeScoreResponse,
-  ExternalFinalScoreResponse,
-  ExternalMeetingScoreResponse,
-  ExternalTaskScoreResponse,
+  ExternalFullPipelineResponse,
+  ExternalMemberMeetingData,
+  ExternalTeamSettings,
   deriveMemberData,
-  mapMeetingResult,
   mapTeamSettings,
-  toCumulativeItems,
   toTaskActions,
 } from './contribution.mapper';
 
 // 외부 기여도 산정 서버(cc-team-8/Contribution, FastAPI) HTTP 클라이언트.
-// 외부 API 는 멤버 1명 단위 엔드포인트라 여기서 멤버별 fan-out 후 기존 응답 계약으로 조립한다.
+// 기존 calculate(server/src/contribution)와 동일한 /pipeline/score 단일 엔드포인트만 사용한다.
+// pipeline 은 멤버 1명 단위(원시 데이터 → 누적·테스크·최종)라 멤버별 fan-out 후
+// 기존 응답 계약으로 조립한다.
 // CONTRIBUTION_SERVICE_URL 미설정 시 호출을 건너뛰고 null 을 반환해
 // (개발/데모 환경에서) 회의 종료·조회 흐름이 끊기지 않도록 한다.
 @Injectable()
@@ -40,84 +39,114 @@ export class ContributionClient {
     return !!this.baseUrl;
   }
 
-  // ① 회의 기여도 — 참여자별 /meeting/score 병렬 호출
+  // ① 회의 기여도 — 참여자별 /pipeline/score(회의 1건) 호출.
+  // pipeline 응답은 누적(②) 형태뿐이라 회의 1건의 누적 = 그 회의 점수로 읽는다.
+  // 출석률은 보낸 파생값으로 로컬 보존하고, 외부 상세(신뢰도 등급 등)는 pipeline 미제공 → null.
   async computeMeetingScores(
     payload: MeetingScoreRequest,
   ): Promise<MeetingScoreResponse | null> {
     if (!this.baseUrl) {
-      this.warnUnconfigured('/meeting/score');
+      this.warnUnconfigured();
       return null;
     }
     const cfg = mapTeamSettings(payload.team_settings);
     const scores = await Promise.all(
       payload.participant_user_ids.map(async (uid) => {
         const { data, rawSpeechRatio } = deriveMemberData(payload, uid);
-        const ext = await this.post<ExternalMeetingScoreResponse>(
-          '/meeting/score',
-          { data, cfg },
+        // 비정규 회의도 ① 점수는 산출해야 하므로 official 로 보낸다
+        // (officialness 는 누적(②) 포함 여부에만 쓰이고, ②는 별도 호출에서 반영).
+        const ext = await this.pipeline(
+          [{ ...data, is_official: true }],
+          false,
+          cfg,
         );
-        return mapMeetingResult(uid, ext, rawSpeechRatio);
+        return {
+          user_id: uid,
+          speech_ratio: rawSpeechRatio,
+          speech_consistency: null,
+          attendance_ratio:
+            data.meeting_total_sec > 0
+              ? data.actual_attend_sec / data.meeting_total_sec
+              : null,
+          punctuality_score: null,
+          // 포함 0건(최소시간 미만 등) = 측정 불가 → null.
+          // 무단 결석은 엔진이 0점으로 포함시키므로 0 이 저장된다.
+          meeting_score:
+            ext.meeting.included_count > 0 ? ext.meeting.score : null,
+          confidence_level: null,
+          excluded_indicators: null,
+        };
       }),
     );
     return { scores };
   }
 
-  // ②③④ — 멤버별 cumulative → task → final 순차 호출 (멤버 간은 병렬)
+  // ②③④ — 멤버별 /pipeline/score 1회 (참여한 회의들의 원시 파생 데이터 + 액션 동봉)
   async computeTeamContributions(
-    payload: TeamContributionRequest,
+    payload: TeamPipelineRequest,
   ): Promise<TeamContributionResponse | null> {
     if (!this.baseUrl) {
-      this.warnUnconfigured('/cumulative·/task·/final');
+      this.warnUnconfigured();
       return null;
     }
     const cfg = mapTeamSettings(payload.team_settings);
     const now = new Date();
     const members = await Promise.all(
       payload.members.map(async (m) => {
-        const name = String(m.user_id);
-        const cumulative = await this.post<ExternalCumulativeScoreResponse>(
-          '/cumulative/score',
-          { name, meeting_scores: toCumulativeItems(payload, m.user_id), cfg },
-        );
-        const task = await this.post<ExternalTaskScoreResponse>('/task/score', {
-          name,
-          actions: toTaskActions(payload.action_items, m.user_id, now),
-          cfg,
-        });
-        const fin = await this.post<ExternalFinalScoreResponse>(
-          '/final/score',
-          {
-            cumulative_name: name,
-            cumulative_score: cumulative.score,
-            cumulative_meeting_count: cumulative.meeting_count,
-            cumulative_included_count: cumulative.included_count,
-            cumulative_excluded_count: cumulative.excluded_count,
-            task_name: name,
-            task_score: task.score,
-            task_total_actions: task.total_actions,
-            task_completed_actions: task.completed_actions,
-            is_leader: m.role === 'leader',
-            cfg,
-          },
-        );
+        const actions = toTaskActions(payload.action_items, m.user_id, now);
+        // 참여한 회의만 누적 입력에 포함 — 저장된 ① 행 기반이던 기존 정책과 동일
+        const rows: ExternalMemberMeetingData[] = payload.meetings
+          .filter((mt) => mt.participant_user_ids.includes(m.user_id))
+          .map((mt) => {
+            const { data } = deriveMemberData(mt, m.user_id);
+            // 무효 처리된 회의는 비정규로 보내 누적에서 제외시킨다
+            return mt.is_invalidated ? { ...data, is_official: false } : data;
+          });
+        if (rows.length === 0 && actions.length === 0) {
+          return {
+            user_id: m.user_id,
+            meeting_aggregate: null,
+            task_score: null,
+            composite_score: null,
+          };
+        }
+        // pipeline 은 meetings 가 비면 거부 — 회의 0건인 멤버의 테스크 점수용 운반 행
+        // (사유 결석 + 비정규라 누적(②)에서는 제외된다)
+        if (rows.length === 0) rows.push(taskCarrierRow(m.user_id));
+        rows[0] = { ...rows[0], actions };
+        const ext = await this.pipeline(rows, m.role === 'leader', cfg);
         return {
           user_id: m.user_id,
           // 포함 회의 0건이면 엔진은 0.0 을 주지만 "측정 불가"는 null 로 구분 (로컬 스코어러와 동일)
           meeting_aggregate:
-            cumulative.included_count > 0 ? cumulative.score : null,
-          task_score: task.score,
+            ext.meeting.included_count > 0 ? ext.meeting.score : null,
+          task_score: ext.task.score,
           // 측정 축이 하나도 없으면 weights_used 가 빈 객체 → 종합 점수 없음
           composite_score:
-            Object.keys(fin.weights_used).length > 0 ? fin.final : null,
+            Object.keys(ext.final.weights_used).length > 0
+              ? ext.final.final
+              : null,
         };
       }),
     );
     return { members };
   }
 
-  private warnUnconfigured(path: string) {
+  private async pipeline(
+    meetings: ExternalMemberMeetingData[],
+    isLeader: boolean,
+    cfg: ExternalTeamSettings,
+  ): Promise<ExternalFullPipelineResponse> {
+    return this.post<ExternalFullPipelineResponse>('/pipeline/score', {
+      meetings,
+      is_leader: isLeader,
+      cfg,
+    });
+  }
+
+  private warnUnconfigured() {
     this.logger.warn(
-      `CONTRIBUTION_SERVICE_URL 미설정 — 기여도 산정(${path})을 건너뜁니다.`,
+      'CONTRIBUTION_SERVICE_URL 미설정 — 기여도 산정(/pipeline/score)을 건너뜁니다.',
     );
   }
 
@@ -152,4 +181,24 @@ export class ContributionClient {
       clearTimeout(timer);
     }
   }
+}
+
+// 회의 데이터 없이 액션만 보낼 때 쓰는 자리표시 행 — 엔진 누적 계산에서 제외되는 조합
+function taskCarrierRow(userId: number): ExternalMemberMeetingData {
+  return {
+    name: String(userId),
+    meeting_id: 'none',
+    meeting_total_sec: 0,
+    actual_attend_sec: 0,
+    late_sec: 0,
+    own_chars: 0,
+    utterance_count: 0,
+    total_chars_during: 0,
+    team_size: 1,
+    audio_loss_pct: 0,
+    speech_confidence: 1,
+    excused_absence: true,
+    absent: true,
+    is_official: false,
+  };
 }

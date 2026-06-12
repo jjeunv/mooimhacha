@@ -81,6 +81,19 @@ export interface TeamContributionRequest {
   }[];
 }
 
+// ②③④ 외부 산정 입력 — 기존 calculate 와 같은 /pipeline/score 계약은 저장된 ① 점수를
+// 받지 못하므로(원시 데이터 → 최종 점수), 회의별 원시 이벤트를 다시 모아 보낸다.
+// 로컬 폴백 스코어러는 저장된 ① 기반의 TeamContributionRequest 를 그대로 쓴다.
+export type MeetingRawInput = Omit<MeetingScoreRequest, 'agendas'>;
+
+export interface TeamPipelineRequest {
+  team_id: number;
+  team_settings: TeamSettingsPayload;
+  members: { user_id: number; role: string }[];
+  meetings: (MeetingRawInput & { is_invalidated: boolean })[];
+  action_items: TeamContributionRequest['action_items'];
+}
+
 export interface TeamContributionResult {
   user_id: number;
   meeting_aggregate: number | null; // ② 회의 종합
