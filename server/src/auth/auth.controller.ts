@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
+import { User } from '../entities/user.entity';
 import { KakaoLoginDto } from './dto/kakao-login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -71,6 +72,23 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(req.user.id, dto);
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '현재 로그인 사용자 정보' })
+  me(@Request() req: { user: User }) {
+    const u = req.user;
+    return {
+      id: u.id,
+      name: u.name,
+      kakao_email: u.kakao_email,
+      university: u.university,
+      department: u.department,
+      profile_image_url: u.profile_image_url,
+      email_opt_out: u.email_opt_out,
+    };
   }
 
   @Post('refresh')

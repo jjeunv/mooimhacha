@@ -1,0 +1,121 @@
+// 프론트엔드 공용 도메인 타입 (서버 엔티티와 대응)
+
+export type AgendaStatus = "pending" | "active" | "done";
+export type MeetingStatus = "scheduled" | "active" | "ended";
+
+export interface Team {
+  id: number;
+  name: string;
+  course_name: string | null;
+  role?: "leader" | "member";
+}
+
+export interface TeamMember {
+  user_id: number;
+  name: string;
+  profile_image_url: string | null;
+  role: "leader" | "member";
+}
+
+export interface Meeting {
+  id: number;
+  team_id: number;
+  scheduled_at: string;
+  total_minutes: number;
+  topic: string | null;
+  status: MeetingStatus;
+  t0_timestamp: string | null;
+  ended_at: string | null;
+  meeting_type: string;
+  summary?: string | null;
+}
+
+export interface Agenda {
+  id: number;
+  meeting_id: number;
+  title: string;
+  estimated_minutes: number;
+  order_index: number;
+  status: AgendaStatus;
+  started_at_offset_ms: number | null;
+  ended_at_offset_ms: number | null;
+  actual_minutes: number | null;
+  source: string;
+  summary: string | null;
+}
+
+export interface Decision {
+  id: number;
+  meeting_id: number;
+  content: string;
+  agenda_id: number | null;
+  created_by: number;
+}
+
+export interface ActionItem {
+  id: number;
+  team_id: number;
+  assignee_id: number | null;
+  description: string;
+  due_date: string | null;
+  difficulty: number;
+  status: string;
+}
+
+export interface MeetingContribution {
+  user_id: number;
+  name: string;
+  speech_ratio: number | null;
+  attendance_ratio: number | null;
+  meeting_score: number | null;
+  confidence_level: string | null;
+}
+
+export interface TeamContribution {
+  user_id: number;
+  name: string;
+  role?: "leader" | "member";
+  meeting_aggregate: number | null;
+  task_score: number | null;
+  composite_score: number | null;
+}
+
+export interface CurrentUser {
+  id: number;
+  name: string;
+  kakao_email: string | null;
+  university: string | null;
+  department: string | null;
+  profile_image_url: string | null;
+  email_opt_out?: boolean;
+}
+
+// 기여도 집계 규칙 (서버 team_settings 엔티티 대응)
+export interface TeamSettings {
+  team_id: number;
+  punctuality_grace_ratio: number;
+  presence_grace_seconds: number;
+  max_utterance_chars: number;
+  deadline_penalty_curve: "standard" | "lenient" | "strict";
+  absent_meeting_handling: "exclude" | "zero" | "attendance_only";
+  min_meeting_minutes: number;
+  final_task_weight: number;
+  leader_bonus_multiplier: number;
+  contribution_visibility: "team" | "leader" | "self";
+}
+
+export interface TeamDetail extends Team {
+  members: TeamMember[];
+  settings?: TeamSettings | null;
+}
+
+export interface Notification {
+  id: number;
+  type: "meeting_soon" | "action_assigned" | "meeting_confirmed";
+  title: string;
+  body: string | null;
+  meeting_id: number | null;
+  action_item_id: number | null;
+  read: boolean;
+  created_at: string;
+}
