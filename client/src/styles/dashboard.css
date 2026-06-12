@@ -822,6 +822,15 @@
   align-items: center;
   gap: 3px;
 }
+.tc-diff {
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.tc-diff-off {
+  color: var(--border-2);
+}
 .tc-foot {
   display: flex;
   align-items: center;

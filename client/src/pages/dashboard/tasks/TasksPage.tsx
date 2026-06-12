@@ -365,18 +365,32 @@ export default function TasksPage() {
                           </span>
                           {who}
                         </span>
-                        <select
-                          className={`tc-status ${STATUS_CLS[status]}`}
-                          value={status}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            void changeStatus(t, e.target.value as Status)
-                          }
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 7,
+                          }}
                         >
-                          <option>할 일</option>
-                          <option>진행 중</option>
-                          <option>완료</option>
-                        </select>
+                          <span className="tc-diff">
+                            {"★".repeat(t.difficulty ?? 1)}
+                            <span className="tc-diff-off">
+                              {"★".repeat(3 - (t.difficulty ?? 1))}
+                            </span>
+                          </span>
+                          <select
+                            className={`tc-status ${STATUS_CLS[status]}`}
+                            value={status}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              void changeStatus(t, e.target.value as Status)
+                            }
+                          >
+                            <option>할 일</option>
+                            <option>진행 중</option>
+                            <option>완료</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   );
@@ -433,6 +447,12 @@ export default function TasksPage() {
                 >
                   {status === "완료" ? "완료" : dd.label || "기한 없음"}
                 </div>
+                <span className="tc-diff">
+                  {"★".repeat(t.difficulty ?? 1)}
+                  <span className="tc-diff-off">
+                    {"★".repeat(3 - (t.difficulty ?? 1))}
+                  </span>
+                </span>
               </div>
             );
           })}
