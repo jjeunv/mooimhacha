@@ -89,6 +89,10 @@ export default function TasksPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // 드래그 앤 드롭
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<Status | null>(null);
+
   const load = useCallback(async () => {
     if (!team) return;
     try {
@@ -307,7 +311,25 @@ export default function TasksPage() {
               (t) => API_TO_STATUS[t.status] === col,
             );
             return (
-              <div key={col} className="board-col">
+              <div
+                key={col}
+                className={`board-col ${dragOverCol === col ? "drag-over" : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverCol(col);
+                }}
+                onDragLeave={() => setDragOverCol(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverCol(null);
+                  setDraggingId(null);
+                  const id = Number(e.dataTransfer.getData("taskId"));
+                  const task = tasks.find((t) => t.id === id);
+                  if (task && API_TO_STATUS[task.status] !== col) {
+                    void changeStatus(task, col);
+                  }
+                }}
+              >
                 <div className="col-head">
                   <span
                     className="col-dot"
@@ -337,11 +359,18 @@ export default function TasksPage() {
                   return (
                     <div
                       key={t.id}
-                      className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""}`}
+                      draggable
+                      className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
                       style={{
-                        cursor: "pointer",
+                        cursor: draggingId === t.id ? "grabbing" : "grab",
                         ...stripeStyle(t.assignee_id, danger, warn),
                       }}
+                      onDragStart={(e) => {
+                        setDraggingId(t.id);
+                        e.dataTransfer.setData("taskId", String(t.id));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragEnd={() => setDraggingId(null)}
                       onClick={() => openEdit(t)}
                     >
                       <div className="tc-head">
