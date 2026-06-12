@@ -138,6 +138,17 @@ export default function TasksPage() {
   const done = tasks.filter((t) => t.status === "done").length;
   const total = tasks.length;
 
+  // 마감일 오름차순, 동일 날짜면 난이도 내림차순(높은 것 먼저)
+  const sortedTasks = [...tasks].sort((a, b) => {
+    if (a.due_date && b.due_date) {
+      const diff =
+        new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      if (diff !== 0) return diff;
+    } else if (a.due_date) return -1;
+    else if (b.due_date) return 1;
+    return (b.difficulty ?? 1) - (a.difficulty ?? 1);
+  });
+
   useEffect(() => {
     requestAnimationFrame(() => {
       document
@@ -292,7 +303,7 @@ export default function TasksPage() {
       {view === "board" && (
         <div className="board">
           {STATUS_COLS.map((col) => {
-            const colTasks = tasks.filter(
+            const colTasks = sortedTasks.filter(
               (t) => API_TO_STATUS[t.status] === col,
             );
             return (
@@ -407,7 +418,7 @@ export default function TasksPage() {
       {/* 목록 뷰 */}
       {view === "list" && (
         <div>
-          {tasks.map((t) => {
+          {sortedTasks.map((t) => {
             const status = API_TO_STATUS[t.status];
             const dd = dueState(t.due_date);
             const danger = status !== "완료" && dd.danger;
