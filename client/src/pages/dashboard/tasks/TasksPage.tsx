@@ -152,7 +152,7 @@ export default function TasksPage() {
     setEditTarget(task);
     setEditDesc(task.description);
     setEditAssignee(task.assignee_id ? String(task.assignee_id) : "");
-    setEditDue(task.due_date ?? "");
+    setEditDue(task.due_date?.slice(0, 10) ?? "");
     setEditStatus(API_TO_STATUS[task.status] ?? "할 일");
     setEditDifficulty(task.difficulty ?? 2);
   }
