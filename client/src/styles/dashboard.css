@@ -794,9 +794,6 @@
 .tcard.warn {
   border-left: 3px solid var(--amber);
 }
-.tcard.done-card {
-  opacity: 0.62;
-}
 .tcard.dragging {
   opacity: 0.35;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
