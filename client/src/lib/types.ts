@@ -78,6 +78,9 @@ export interface TeamContribution {
   meeting_aggregate: number | null;
   task_score: number | null;
   composite_score: number | null;
+  // 레이더(출석·참여도 축)용 — 산정 포함 회의의 ① 비율 단순 평균 (0~1)
+  attendance_avg?: number | null;
+  speech_avg?: number | null;
 }
 
 export interface CurrentUser {

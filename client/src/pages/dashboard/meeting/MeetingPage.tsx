@@ -1,56 +1,153 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useOutletContext } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import Modal from "@/components/Modal";
-
-const MEETINGS = [
-  {
-    name: "발표 준비 회의",
-    status: "live",
-    meta: "오늘 3:00 · 4명 · 아젠다 3",
-  },
-  { name: "최종 발표 리허설", status: "soon", meta: "5월 11일 2:00 · 4명" },
-  { name: "중간 점검 회의", status: "done", meta: "5월 5일 · 52분" },
-  { name: "킥오프 회의", status: "done", meta: "5월 1일 · 38분" },
-];
-
-const SPEAK = [
-  { av: "a1", name: "김민준", pct: 38, grad: "var(--av1)", label: "9분 · 38%" },
-  { av: "a2", name: "이서연", pct: 31, grad: "var(--av2)", label: "7분 · 31%" },
-  { av: "a4", name: "최유나", pct: 23, grad: "var(--av4)", label: "6분 · 23%" },
-  {
-    av: "a3",
-    name: "박지호",
-    pct: 8,
-    grad: "var(--coral)",
-    label: "2분 · 8%",
-    warn: true,
-  },
-];
+import { apiGet, apiPost } from "@/lib/api";
+import type {
+  Agenda,
+  Decision,
+  Meeting,
+  MeetingContribution,
+} from "@/lib/types";
+import type { TeamContext } from "../DashboardPage";
 
 type Tab = "agenda" | "speak" | "decision" | "summary";
 
+const AV_GRADS = ["var(--av1)", "var(--av2)", "var(--av3)", "var(--av4)"];
+
+function meetingMeta(m: Meeting, memberCount: number): string {
+  const d = new Date(m.scheduled_at);
+  const today = new Date();
+  const day =
+    d.toDateString() === today.toDateString()
+      ? "오늘"
+      : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  const time = d.toLocaleTimeString("ko-KR", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (m.status === "ended" && m.t0_timestamp && m.ended_at) {
+    const mins = Math.max(
+      1,
+      Math.round(
+        (new Date(m.ended_at).getTime() -
+          new Date(m.t0_timestamp).getTime()) /
+          60000,
+      ),
+    );
+    return `${day} · ${mins}분`;
+  }
+  return `${day} ${time} · ${memberCount}명`;
+}
+
 export default function MeetingPage() {
   const { showToast } = useToast();
+  const team = useOutletContext<TeamContext | null>();
   const [tab, setTab] = useState<Tab>("agenda");
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [agendas, setAgendas] = useState<Agenda[]>([]);
+  const [speak, setSpeak] = useState<MeetingContribution[]>([]);
+  const [decisions, setDecisions] = useState<Decision[]>([]);
   // elapsed: 초 단위 정수. fmt()로 MM:SS 포맷 변환.
-  const [elapsed, setElapsed] = useState(24 * 60 + 17);
-  const [decisions, setDecisions] = useState([
-    "슬라이드 총 12장, 민준이 최종 편집 담당",
-    "발표 순서: 서연(서론) → 민준(본론) → 유나(결론)",
-  ]);
+  const [elapsed, setElapsed] = useState(0);
   const [decInput, setDecInput] = useState("");
   // 세 모달을 하나의 state로 관리. null이면 모두 닫힘.
   const [modalOpen, setModalOpen] = useState<
     "meeting" | "decision" | "agenda" | null
   >(null);
+  const [busy, setBusy] = useState(false);
   // 발언 탭 최초 진입 시 바 애니메이션을 한 번만 실행하기 위한 플래그.
   // state 대신 ref를 쓰는 이유: 값 변경이 리렌더를 유발할 필요 없음.
   const barsAnimated = useRef(false);
 
+  // 새 회의 모달 입력값
+  const [newTopic, setNewTopic] = useState("");
+  const [newDate, setNewDate] = useState("");
+  const [newTime, setNewTime] = useState("15:00");
+  const [newMinutes, setNewMinutes] = useState(30);
+  const [newAgendas, setNewAgendas] = useState("");
+
+  // 아젠다 모달 입력값
+  const [agTitle, setAgTitle] = useState("");
+  const [agMinutes, setAgMinutes] = useState(10);
+
+  const selected = meetings.find((m) => m.id === selectedId) ?? null;
+
+  const loadMeetings = useCallback(async () => {
+    if (!team) return;
+    try {
+      const ms = await apiGet<Meeting[]>(`/meetings?team_id=${team.id}`);
+      setMeetings(ms);
+      // 선택 유지, 없으면 진행 중 → 예정 → 최근 종료 순으로 기본 선택
+      setSelectedId((cur) => {
+        if (cur && ms.some((m) => m.id === cur)) return cur;
+        const active = ms.find((m) => m.status === "active");
+        const scheduled = [...ms]
+          .filter((m) => m.status === "scheduled")
+          .sort(
+            (a, b) =>
+              new Date(a.scheduled_at).getTime() -
+              new Date(b.scheduled_at).getTime(),
+          )[0];
+        const ended = [...ms]
+          .filter((m) => m.status === "ended")
+          .sort(
+            (a, b) =>
+              new Date(b.scheduled_at).getTime() -
+              new Date(a.scheduled_at).getTime(),
+          )[0];
+        return (active ?? scheduled ?? ended)?.id ?? null;
+      });
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    }
+  }, [team, showToast]);
+
   useEffect(() => {
-    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
+    void loadMeetings();
+  }, [loadMeetings]);
+
+  // 선택 회의의 상세(아젠다·발언·결정) 로드
+  useEffect(() => {
+    if (!selectedId) {
+      setAgendas([]);
+      setSpeak([]);
+      setDecisions([]);
+      return;
+    }
+    let alive = true;
+    barsAnimated.current = false;
+    void Promise.allSettled([
+      apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`),
+      apiGet<{ scores: MeetingContribution[] }>(
+        `/meetings/${selectedId}/contributions`,
+      ),
+      apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`),
+    ]).then(([ag, sp, dc]) => {
+      if (!alive) return;
+      if (ag.status === "fulfilled") setAgendas(ag.value);
+      if (sp.status === "fulfilled") setSpeak(sp.value.scores);
+      if (dc.status === "fulfilled") setDecisions(dc.value);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [selectedId]);
+
+  // 진행 중 회의 경과 시간 — t0 기준 실측, 1초 틱
+  useEffect(() => {
+    if (!selected || selected.status !== "active" || !selected.t0_timestamp) {
+      setElapsed(0);
+      return;
+    }
+    const t0 = new Date(selected.t0_timestamp).getTime();
+    const tick = () =>
+      setElapsed(Math.max(0, Math.floor((Date.now() - t0) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [selected]);
 
   useEffect(() => {
     if (tab === "speak" && !barsAnimated.current) {
@@ -63,36 +160,151 @@ export default function MeetingPage() {
           });
       });
     }
-  }, [tab]);
+  }, [tab, speak]);
 
   const fmt = (s: number) =>
     String(Math.floor(s / 60)).padStart(2, "0") +
     ":" +
     String(s % 60).padStart(2, "0");
 
-  function addDecision() {
+  async function addDecision() {
     if (!decInput.trim()) {
       showToast("결정 내용을 입력해주세요");
       return;
     }
-    setDecisions((d) => [...d, decInput.trim()]);
-    setDecInput("");
-    setModalOpen(null);
-    showToast("결정 사항이 추가되었습니다");
+    if (!selectedId || busy) return;
+    setBusy(true);
+    try {
+      await apiPost("/decisions", {
+        meeting_id: selectedId,
+        content: decInput.trim(),
+      });
+      setDecisions(
+        await apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`),
+      );
+      setDecInput("");
+      setModalOpen(null);
+      showToast("결정 사항이 추가되었습니다");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createMeeting() {
+    if (!team || busy) return;
+    if (!newDate) {
+      showToast("날짜를 선택해 주세요", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await apiPost<Meeting>("/meetings", {
+        team_id: team.id,
+        scheduled_at: new Date(`${newDate}T${newTime}:00`).toISOString(),
+        total_minutes: newMinutes,
+        topic: newTopic.trim() || undefined,
+      });
+      // 줄바꿈으로 입력한 아젠다를 순서대로 등록
+      const lines = newAgendas
+        .split("\n")
+        .map((l) => l.replace(/^\d+[.)]\s*/, "").trim())
+        .filter(Boolean);
+      for (const title of lines) {
+        await apiPost(`/meetings/${created.id}/agendas`, { title });
+      }
+      setModalOpen(null);
+      setNewTopic("");
+      setNewDate("");
+      setNewAgendas("");
+      showToast("새 회의가 생성되었습니다");
+      await loadMeetings();
+      setSelectedId(created.id);
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addAgenda() {
+    if (!selectedId || busy) return;
+    if (!agTitle.trim()) {
+      showToast("아젠다 내용을 입력해 주세요", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiPost(`/meetings/${selectedId}/agendas`, {
+        title: agTitle.trim(),
+        estimated_minutes: agMinutes,
+      });
+      setAgendas(await apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`));
+      setModalOpen(null);
+      setAgTitle("");
+      showToast("아젠다가 추가되었습니다");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function endMeeting() {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      await apiPost(`/meetings/${selected.id}/end`);
+      showToast("회의가 종료되었습니다. 기여도가 산정돼요");
+      await loadMeetings();
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // status → CSS 클래스/레이블 매핑. as const로 유니온 키 타입 접근 보장.
   const spillCls = {
-    live: "spill-live",
-    soon: "spill-soon",
-    done: "spill-done",
+    active: "spill-live",
+    scheduled: "spill-soon",
+    ended: "spill-done",
   } as const;
-  const spillLabel = { live: "진행", soon: "예정", done: "완료" } as const;
-  const groups = [
-    { label: "진행 중", items: MEETINGS.filter((m) => m.status === "live") },
-    { label: "예정", items: MEETINGS.filter((m) => m.status === "soon") },
-    { label: "완료", items: MEETINGS.filter((m) => m.status === "done") },
-  ];
+  const spillLabel = {
+    active: "진행",
+    scheduled: "예정",
+    ended: "완료",
+  } as const;
+  const groups = useMemo(
+    () => [
+      {
+        label: "진행 중",
+        items: meetings.filter((m) => m.status === "active"),
+      },
+      {
+        label: "예정",
+        items: meetings.filter((m) => m.status === "scheduled"),
+      },
+      {
+        label: "완료",
+        items: [...meetings]
+          .filter((m) => m.status === "ended")
+          .sort(
+            (a, b) =>
+              new Date(b.scheduled_at).getTime() -
+              new Date(a.scheduled_at).getTime(),
+          ),
+      },
+    ],
+    [meetings],
+  );
+
+  // 발언 경고: 비중 10% 미만 멤버
+  const lowSpeaker = speak.find(
+    (s) => s.speech_ratio != null && s.speech_ratio < 0.1,
+  );
+  const headMeta = selected ? meetingMeta(selected, team?.member_count ?? 0) : "";
 
   return (
     <>
@@ -109,6 +321,13 @@ export default function MeetingPage() {
             </button>
           </div>
           <div className="msb-list scroll">
+            {meetings.length === 0 && (
+              <div
+                style={{ padding: 14, fontSize: 12.5, color: "var(--text-soft)" }}
+              >
+                아직 회의가 없습니다. + 버튼으로 만들어 보세요.
+              </div>
+            )}
             {groups.map(
               ({ label, items }) =>
                 items.length > 0 && (
@@ -116,18 +335,22 @@ export default function MeetingPage() {
                     <div className="msb-group">{label}</div>
                     {items.map((m) => (
                       <div
-                        key={m.name}
-                        className={`mcard ${m.status === "live" ? "sel" : ""}`}
+                        key={m.id}
+                        className={`mcard ${m.id === selectedId ? "sel" : ""}`}
+                        onClick={() => setSelectedId(m.id)}
+                        style={{ cursor: "pointer" }}
                       >
                         <div className="mcard-top">
-                          <div className="mcard-name">{m.name}</div>
-                          <span
-                            className={`spill ${spillCls[m.status as keyof typeof spillCls]}`}
-                          >
-                            {spillLabel[m.status as keyof typeof spillLabel]}
+                          <div className="mcard-name">
+                            {m.topic ?? "제목 없는 회의"}
+                          </div>
+                          <span className={`spill ${spillCls[m.status]}`}>
+                            {spillLabel[m.status]}
                           </span>
                         </div>
-                        <div className="mcard-meta">{m.meta}</div>
+                        <div className="mcard-meta">
+                          {meetingMeta(m, team?.member_count ?? 0)}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -138,181 +361,255 @@ export default function MeetingPage() {
 
         {/* 상세 */}
         <div className="mdetail">
-          <div className="mdetail-head">
-            <div className="mdh-top">
-              <div className="mdh-title">발표 준비 회의</div>
-              <button className="btn btn-danger btn-sm">
-                <i className="ti ti-player-stop" /> 회의 종료
-              </button>
+          {!selected ? (
+            <div style={{ padding: 24, fontSize: 13.5, color: "var(--text-soft)" }}>
+              왼쪽에서 회의를 선택하거나 새 회의를 만들어 보세요.
             </div>
-            <div className="mdh-meta">
-              <span>
-                <i className="ti ti-calendar" /> 오늘 오후 3:00
-              </span>
-              <span>
-                <i className="ti ti-users" /> 4명 참석
-              </span>
-              <span style={{ color: "var(--coral)", fontWeight: 700 }}>
-                <i className="ti ti-clock" /> {fmt(elapsed)}
-              </span>
-            </div>
-            <div className="tabs">
-              {(["agenda", "speak", "decision", "summary"] as Tab[]).map(
-                (t) => (
-                  <div
-                    key={t}
-                    className={`tab ${tab === t ? "active" : ""}`}
-                    onClick={() => setTab(t)}
-                  >
-                    {
-                      {
-                        agenda: "아젠다",
-                        speak: "발언 기록",
-                        decision: "결정 사항",
-                        summary: "회의 요약",
-                      }[t]
-                    }
+          ) : (
+            <>
+              <div className="mdetail-head">
+                <div className="mdh-top">
+                  <div className="mdh-title">
+                    {selected.topic ?? "제목 없는 회의"}
                   </div>
-                ),
-              )}
-            </div>
-          </div>
-
-          <div className="tab-body scroll">
-            {/* 아젠다 */}
-            {tab === "agenda" && (
-              <div className="tab-panel active">
-                <div className="panel-label">아젠다 진행</div>
-                <div className="ag-item cur">
-                  <div className="ag-num">
-                    <i
-                      className="ti ti-player-play-filled"
-                      style={{ fontSize: 9 }}
-                    />
-                  </div>
-                  <div className="ag-text">슬라이드 구성 검토</div>
-                  <div className="ag-prog">
-                    <i style={{ width: "72%" }} />
-                  </div>
-                  <div className="ag-time">10분</div>
-                </div>
-                {[
-                  { num: "2", text: "발표 역할 분담 확정", time: "10분" },
-                  { num: "3", text: "Q&A 예상 질문 준비", time: "15분" },
-                ].map((a) => (
-                  <div key={a.num} className="ag-item">
-                    <div className="ag-num">{a.num}</div>
-                    <div className="ag-text">{a.text}</div>
-                    <div className="ag-prog">
-                      <i style={{ width: "0%" }} />
-                    </div>
-                    <div className="ag-time">{a.time}</div>
-                  </div>
-                ))}
-                <button
-                  className="add-col"
-                  style={{ marginTop: 4 }}
-                  onClick={() => setModalOpen("agenda")}
-                >
-                  <i className="ti ti-plus" /> 아젠다 추가
-                </button>
-              </div>
-            )}
-
-            {/* 발언 기록 */}
-            {tab === "speak" && (
-              <div className="tab-panel active">
-                <div
-                  className="panel-label"
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  발언 분포{" "}
-                  <span
-                    className="live-dot"
-                    style={{ background: "var(--green)" }}
-                  />
-                  <span
-                    style={{
-                      marginLeft: "auto",
-                      textTransform: "none",
-                      letterSpacing: 0,
-                      color: "var(--text-soft)",
-                      fontWeight: 500,
-                    }}
-                  >
-                    총 24분 기준
-                  </span>
-                </div>
-                {SPEAK.map((s) => (
-                  <div key={s.name} className="speak-row">
-                    <div className={`av ${s.av} av-sm`}>{s.name[0]}</div>
-                    <span className="speak-name">{s.name}</span>
-                    <span className="speak-bar">
-                      <i data-w={s.pct} style={{ background: s.grad }} />
-                    </span>
-                    <span
-                      className="speak-pct"
-                      style={s.warn ? { color: "var(--coral)" } : undefined}
+                  {selected.status === "active" && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => void endMeeting()}
+                      disabled={busy}
                     >
-                      {s.label}
+                      <i className="ti ti-player-stop" /> 회의 종료
+                    </button>
+                  )}
+                </div>
+                <div className="mdh-meta">
+                  <span>
+                    <i className="ti ti-calendar" /> {headMeta}
+                  </span>
+                  <span>
+                    <i className="ti ti-users" /> {team?.member_count ?? "-"}명
+                  </span>
+                  {selected.status === "active" && (
+                    <span style={{ color: "var(--coral)", fontWeight: 700 }}>
+                      <i className="ti ti-clock" /> {fmt(elapsed)}
                     </span>
-                  </div>
-                ))}
-                <div
-                  className="summary-box"
-                  style={{
-                    marginTop: 14,
-                    background: "var(--coral-soft)",
-                    borderColor: "rgba(240,102,79,.4)",
-                  }}
-                >
-                  <i
-                    className="ti ti-alert-triangle"
-                    style={{ color: "var(--coral)" }}
-                  />
-                  박지호님의 발언 비중이 10% 미만입니다. 의견을 물어봐 주세요.
+                  )}
+                </div>
+                <div className="tabs">
+                  {(["agenda", "speak", "decision", "summary"] as Tab[]).map(
+                    (t) => (
+                      <div
+                        key={t}
+                        className={`tab ${tab === t ? "active" : ""}`}
+                        onClick={() => setTab(t)}
+                      >
+                        {
+                          {
+                            agenda: "아젠다",
+                            speak: "발언 기록",
+                            decision: "결정 사항",
+                            summary: "회의 요약",
+                          }[t]
+                        }
+                      </div>
+                    ),
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* 결정 사항 */}
-            {tab === "decision" && (
-              <div className="tab-panel active">
-                <div
-                  className="panel-label"
-                  style={{ display: "flex", alignItems: "center" }}
-                >
-                  결정 사항
-                  <button
-                    className="btn btn-primary btn-sm"
-                    style={{ marginLeft: "auto" }}
-                    onClick={() => setModalOpen("decision")}
-                  >
-                    <i className="ti ti-plus" /> 추가
-                  </button>
-                </div>
-                {decisions.map((d, i) => (
-                  <div key={i} className="dec-item">
-                    <div className="dec-ic">
-                      <i className="ti ti-check" />
+              <div className="tab-body scroll">
+                {/* 아젠다 */}
+                {tab === "agenda" && (
+                  <div className="tab-panel active">
+                    <div className="panel-label">아젠다 진행</div>
+                    {agendas.length === 0 && (
+                      <div
+                        style={{ fontSize: 12.5, color: "var(--text-soft)", padding: "4px 0 8px" }}
+                      >
+                        등록된 아젠다가 없습니다.
+                      </div>
+                    )}
+                    {agendas.map((a, i) => {
+                      const cur = a.status === "active";
+                      const done = a.status === "done";
+                      return (
+                        <div key={a.id} className={`ag-item ${cur ? "cur" : ""}`}>
+                          <div className="ag-num">
+                            {cur ? (
+                              <i
+                                className="ti ti-player-play-filled"
+                                style={{ fontSize: 9 }}
+                              />
+                            ) : done ? (
+                              <i className="ti ti-check" style={{ fontSize: 10 }} />
+                            ) : (
+                              i + 1
+                            )}
+                          </div>
+                          <div className="ag-text">{a.title}</div>
+                          <div className="ag-prog">
+                            <i
+                              style={{ width: done ? "100%" : cur ? "60%" : "0%" }}
+                            />
+                          </div>
+                          <div className="ag-time">
+                            {a.actual_minutes ?? a.estimated_minutes}분
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {selected.status !== "ended" && (
+                      <button
+                        className="add-col"
+                        style={{ marginTop: 4 }}
+                        onClick={() => setModalOpen("agenda")}
+                      >
+                        <i className="ti ti-plus" /> 아젠다 추가
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* 발언 기록 */}
+                {tab === "speak" && (
+                  <div className="tab-panel active">
+                    <div
+                      className="panel-label"
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      발언 분포{" "}
+                      {selected.status === "active" && (
+                        <span
+                          className="live-dot"
+                          style={{ background: "var(--green)" }}
+                        />
+                      )}
+                      <span
+                        style={{
+                          marginLeft: "auto",
+                          textTransform: "none",
+                          letterSpacing: 0,
+                          color: "var(--text-soft)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        글자 수 기준
+                      </span>
                     </div>
-                    <div className="dec-text">{d}</div>
+                    {speak.length === 0 && (
+                      <div className="summary-box">
+                        <i className="ti ti-info-circle" />
+                        {selected.status === "ended"
+                          ? "산정된 발언 기록이 없습니다."
+                          : "발언 분포는 회의가 종료되면 집계됩니다. 진행 중에는 회의 보조 창에서 실시간으로 확인할 수 있어요."}
+                      </div>
+                    )}
+                    {speak.map((s, i) => {
+                      const pct =
+                        s.speech_ratio == null
+                          ? 0
+                          : Math.round(s.speech_ratio * 100);
+                      const warn = s.speech_ratio != null && s.speech_ratio < 0.1;
+                      return (
+                        <div key={s.user_id} className="speak-row">
+                          <div className={`av a${(i % 4) + 1} av-sm`}>
+                            {s.name[0]}
+                          </div>
+                          <span className="speak-name">{s.name}</span>
+                          <span className="speak-bar">
+                            <i
+                              data-w={pct}
+                              style={{
+                                background: warn
+                                  ? "var(--coral)"
+                                  : AV_GRADS[i % AV_GRADS.length],
+                              }}
+                            />
+                          </span>
+                          <span
+                            className="speak-pct"
+                            style={warn ? { color: "var(--coral)" } : undefined}
+                          >
+                            {s.speech_ratio == null ? "—" : `${pct}%`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {lowSpeaker && (
+                      <div
+                        className="summary-box"
+                        style={{
+                          marginTop: 14,
+                          background: "var(--coral-soft)",
+                          borderColor: "rgba(240,102,79,.4)",
+                        }}
+                      >
+                        <i
+                          className="ti ti-alert-triangle"
+                          style={{ color: "var(--coral)" }}
+                        />
+                        {lowSpeaker.name}님의 발언 비중이 10% 미만입니다. 의견을
+                        물어봐 주세요.
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
+                )}
 
-            {/* 회의 요약 */}
-            {tab === "summary" && (
-              <div className="tab-panel active">
-                <div className="summary-box">
-                  <i className="ti ti-sparkles" />
-                  회의가 종료되면 AI가 자동으로 결정사항·액션아이템·회의록을
-                  요약합니다.
-                </div>
+                {/* 결정 사항 */}
+                {tab === "decision" && (
+                  <div className="tab-panel active">
+                    <div
+                      className="panel-label"
+                      style={{ display: "flex", alignItems: "center" }}
+                    >
+                      결정 사항
+                      <button
+                        className="btn btn-primary btn-sm"
+                        style={{ marginLeft: "auto" }}
+                        onClick={() => setModalOpen("decision")}
+                      >
+                        <i className="ti ti-plus" /> 추가
+                      </button>
+                    </div>
+                    {decisions.length === 0 && (
+                      <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
+                        아직 기록된 결정이 없습니다.
+                      </div>
+                    )}
+                    {decisions.map((d) => (
+                      <div key={d.id} className="dec-item">
+                        <div className="dec-ic">
+                          <i className="ti ti-check" />
+                        </div>
+                        <div className="dec-text">{d.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 회의 요약 */}
+                {tab === "summary" && (
+                  <div className="tab-panel active">
+                    {selected.summary ? (
+                      <div
+                        className="summary-box"
+                        style={{ whiteSpace: "pre-wrap" }}
+                      >
+                        <i className="ti ti-sparkles" />
+                        {selected.summary}
+                      </div>
+                    ) : (
+                      <div className="summary-box">
+                        <i className="ti ti-sparkles" />
+                        회의가 종료되면 AI가 자동으로 결정사항·액션아이템·회의록을
+                        요약합니다.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -328,12 +625,10 @@ export default function MeetingPage() {
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => {
-                  setModalOpen(null);
-                  showToast("새 회의가 생성되었습니다");
-                }}
+                onClick={() => void createMeeting()}
+                disabled={busy}
               >
-                회의 생성
+                {busy ? "생성 중…" : "회의 생성"}
               </button>
             </>
           }
@@ -343,17 +638,42 @@ export default function MeetingPage() {
           </div>
           <div className="field">
             <label className="field-label">회의 이름</label>
-            <input className="input" placeholder="예) 중간 점검 회의" />
+            <input
+              className="input"
+              placeholder="예) 중간 점검 회의"
+              value={newTopic}
+              onChange={(e) => setNewTopic(e.target.value)}
+            />
           </div>
           <div className="field-row">
             <div className="field">
               <label className="field-label">날짜</label>
-              <input className="input" type="date" />
+              <input
+                className="input"
+                type="date"
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+              />
             </div>
             <div className="field">
               <label className="field-label">시간</label>
-              <input className="input" type="time" defaultValue="15:00" />
+              <input
+                className="input"
+                type="time"
+                value={newTime}
+                onChange={(e) => setNewTime(e.target.value)}
+              />
             </div>
+          </div>
+          <div className="field">
+            <label className="field-label">예상 소요 시간 (분)</label>
+            <input
+              className="input"
+              type="number"
+              min={5}
+              value={newMinutes}
+              onChange={(e) => setNewMinutes(Number(e.target.value) || 30)}
+            />
           </div>
           <div className="field">
             <label className="field-label">
@@ -363,6 +683,8 @@ export default function MeetingPage() {
               className="input"
               rows={3}
               placeholder={"1. 진행 상황 공유\n2. 역할 재조정"}
+              value={newAgendas}
+              onChange={(e) => setNewAgendas(e.target.value)}
             />
           </div>
         </Modal>
@@ -378,7 +700,11 @@ export default function MeetingPage() {
               <button className="btn" onClick={() => setModalOpen(null)}>
                 취소
               </button>
-              <button className="btn btn-primary" onClick={addDecision}>
+              <button
+                className="btn btn-primary"
+                onClick={() => void addDecision()}
+                disabled={busy}
+              >
                 추가
               </button>
             </>
@@ -409,10 +735,8 @@ export default function MeetingPage() {
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => {
-                  setModalOpen(null);
-                  showToast("아젠다가 추가되었습니다");
-                }}
+                onClick={() => void addAgenda()}
+                disabled={busy}
               >
                 추가
               </button>
@@ -421,27 +745,22 @@ export default function MeetingPage() {
         >
           <div className="field">
             <label className="field-label">아젠다 내용</label>
-            <input className="input" placeholder="예) 최종 발표 순서 확정" />
+            <input
+              className="input"
+              placeholder="예) 최종 발표 순서 확정"
+              value={agTitle}
+              onChange={(e) => setAgTitle(e.target.value)}
+            />
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label className="field-label">소요 시간 (분)</label>
-              <input
-                className="input"
-                type="number"
-                defaultValue={10}
-                min={1}
-              />
-            </div>
-            <div className="field">
-              <label className="field-label">담당</label>
-              <select className="input">
-                <option>김민준</option>
-                <option>이서연</option>
-                <option>박지호</option>
-                <option>최유나</option>
-              </select>
-            </div>
+          <div className="field">
+            <label className="field-label">소요 시간 (분)</label>
+            <input
+              className="input"
+              type="number"
+              min={1}
+              value={agMinutes}
+              onChange={(e) => setAgMinutes(Number(e.target.value) || 10)}
+            />
           </div>
         </Modal>
       )}

@@ -3,7 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import { getUser, clearSession } from "@/lib/auth";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import Card from "@/components/Card";
+import ProfileEditModal from "@/components/ProfileEditModal";
+import type {
+  ActionItem,
+  Meeting,
+  Notification,
+  TeamContribution,
+} from "@/lib/types";
 import "@/styles/home.css";
 
 interface Team {
@@ -15,100 +23,50 @@ interface Team {
   members: string[];
 }
 
-const TASKS = [
-  {
-    name: "최종 슬라이드 디자인",
-    group: "캡스톤 팀 A",
-    due: "내일 마감",
-    dueCls: "due-red",
-  },
-  {
-    name: "발표 스크립트 작성",
-    group: "캡스톤 팀 A",
-    due: "5월 11일",
-    dueCls: "due-amber",
-  },
-  {
-    name: "4주차 알고리즘 풀이",
-    group: "알고리즘 스터디",
-    due: "5월 13일",
-    dueCls: "due-amber",
-  },
-];
+// 내 태스크/예정 회의에 소속 그룹 이름을 같이 표기하기 위한 합성 타입
+interface MyTask extends ActionItem {
+  group: string;
+}
+interface UpcomingMeeting extends Meeting {
+  group: string;
+  groupCls: string;
+}
 
-const ACTIVITY = [
-  {
-    color: "var(--coral)",
-    text: (
-      <>
-        <b>박지호</b>님 태스크 2개 기한 초과
-      </>
-    ),
-    time: "10분 전",
-  },
-  {
-    color: "var(--green)",
-    text: (
-      <>
-        <b>캡스톤 팀 A</b> 회의 진행 중
-      </>
-    ),
-    time: "1시간 전",
-  },
-  {
-    color: "var(--amber)",
-    text: (
-      <>
-        <b>이서연</b>님이 액션아이템 완료
-      </>
-    ),
-    time: "어제",
-  },
-  {
-    color: "var(--text-soft)",
-    text: (
-      <>
-        <b>알고리즘 스터디</b>에 강민재님 합류
-      </>
-    ),
-    time: "2일 전",
-  },
-];
+// 상대 시각 표기 (알림·활동)
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "방금";
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return "어제";
+  return `${day}일 전`;
+}
 
-const MEETINGS = [
-  {
-    live: true,
-    title: "발표 준비 회의",
-    date: "오늘",
-    time: "오후 3:00",
-    members: 4,
-    group: "캡스톤 팀 A",
-    groupCls: "b-green",
-  },
-  {
-    soon: true,
-    d: "11",
-    m: "5월",
-    title: "최종 발표 리허설",
-    time: "오후 2:00",
-    members: 4,
-    agenda: 2,
-    group: "캡스톤 팀 A",
-    groupCls: "b-green",
-    label: "2일 후",
-  },
-  {
-    d: "13",
-    m: "5월",
-    title: "4주차 알고리즘 풀이",
-    time: "오후 8:00",
-    members: 5,
-    agenda: 1,
-    group: "알고리즘 스터디",
-    groupCls: "b-gray",
-    label: "4일 후",
-  },
-];
+// 마감 표기 (내 태스크)
+function dueInfo(due: string | null): { text: string; cls: string } | null {
+  if (!due) return null;
+  const d = new Date(due);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (diff < 0) return { text: "기한 초과", cls: "due-red" };
+  if (diff === 0) return { text: "오늘 마감", cls: "due-red" };
+  if (diff === 1) return { text: "내일 마감", cls: "due-red" };
+  return {
+    text: `${d.getMonth() + 1}월 ${d.getDate()}일`,
+    cls: diff <= 3 ? "due-amber" : "due-soft",
+  };
+}
+
+// 알림 종류 → 아이콘/색
+const NOTI_STYLE: Record<string, { icon: string; color: string }> = {
+  meeting_soon: { icon: "ti ti-clock", color: "var(--amber)" },
+  action_assigned: { icon: "ti ti-checklist", color: "var(--blue)" },
+  meeting_confirmed: { icon: "ti ti-video", color: "var(--green)" },
+};
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -117,10 +75,17 @@ export default function HomePage() {
   const userName = user?.name ?? "사용자";
   const userInitial = userName[0];
   const [teams, setTeams] = useState<Team[]>([]);
-  const [tasks, setTasks] = useState(TASKS);
+  const [tasks, setTasks] = useState<MyTask[]>([]);
+  const [meetings, setMeetings] = useState<UpcomingMeeting[]>([]);
+  const [notis, setNotis] = useState<Notification[]>([]);
+  // 그룹 카드의 '내 기여도' (team_id → 0~100 또는 null)
+  const [myContrib, setMyContrib] = useState<Map<number, number | null>>(
+    new Map(),
+  );
   const [joinCode, setJoinCode] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [notiOpen, setNotiOpen] = useState(false);
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const notiRef = useRef<HTMLDivElement>(null);
 
@@ -132,7 +97,103 @@ export default function HomePage() {
 
   useEffect(() => {
     fetchTeams();
+    apiGet<Notification[]>("/notifications")
+      .then(setNotis)
+      .catch(() => {});
   }, []);
+
+  // 팀 목록이 잡히면 팀별 데이터(내 태스크·예정 회의·내 기여도)를 모아온다
+  useEffect(() => {
+    if (teams.length === 0 || !user) return;
+    let alive = true;
+    void Promise.allSettled(
+      teams.map(async (t) => {
+        const badgeCls = t.my_role === "leader" ? "b-green" : "b-blue";
+        const [ts, ms, cs] = await Promise.allSettled([
+          apiGet<ActionItem[]>(
+            `/action-items?team_id=${t.id}&assignee_id=${user.id}`,
+          ),
+          apiGet<Meeting[]>(`/meetings?team_id=${t.id}`),
+          apiGet<{ members: TeamContribution[] }>(
+            `/teams/${t.id}/contributions`,
+          ),
+        ]);
+        return {
+          team: t,
+          tasks:
+            ts.status === "fulfilled"
+              ? ts.value
+                  .filter(
+                    (a) => a.status === "todo" || a.status === "in_progress",
+                  )
+                  .map((a) => ({ ...a, group: t.name }))
+              : [],
+          meetings:
+            ms.status === "fulfilled"
+              ? ms.value
+                  .filter(
+                    (m) => m.status === "scheduled" || m.status === "active",
+                  )
+                  .map((m) => ({ ...m, group: t.name, groupCls: badgeCls }))
+              : [],
+          contrib:
+            cs.status === "fulfilled"
+              ? (cs.value.members.find((c) => c.user_id === user.id)
+                  ?.composite_score ?? null)
+              : null,
+        };
+      }),
+    ).then((results) => {
+      if (!alive) return;
+      const ok = results
+        .filter(
+          (r): r is PromiseFulfilledResult<{
+            team: Team;
+            tasks: MyTask[];
+            meetings: UpcomingMeeting[];
+            contrib: number | null;
+          }> => r.status === "fulfilled",
+        )
+        .map((r) => r.value);
+      setTasks(
+        ok
+          .flatMap((r) => r.tasks)
+          .sort((a, b) => {
+            if (!a.due_date) return 1;
+            if (!b.due_date) return -1;
+            return (
+              new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+            );
+          }),
+      );
+      setMeetings(
+        ok
+          .flatMap((r) => r.meetings)
+          .sort((a, b) => {
+            // 진행 중 우선, 이후 가까운 일정 순
+            if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+            return (
+              new Date(a.scheduled_at).getTime() -
+              new Date(b.scheduled_at).getTime()
+            );
+          })
+          .slice(0, 6),
+      );
+      setMyContrib(
+        new Map(
+          ok.map((r) => [
+            r.team.id,
+            r.contrib == null ? null : Math.round(r.contrib * 100),
+          ]),
+        ),
+      );
+    });
+    return () => {
+      alive = false;
+    };
+    // user는 토큰에서 파싱되는 고정값이라 의존성에서 제외
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teams]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -173,9 +234,30 @@ export default function HomePage() {
     }
   }
 
-  function completeTask(idx: number) {
-    setTasks((prev) => prev.filter((_, i) => i !== idx));
+  async function completeTask(task: MyTask) {
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    try {
+      await apiPatch(`/action-items/${task.id}`, { status: "done" });
+      showToast("태스크를 완료했습니다");
+    } catch (err) {
+      setTasks((prev) => [...prev, task]);
+      showToast((err as Error).message, "error");
+    }
   }
+
+  async function readNotification(n: Notification) {
+    if (n.read) return;
+    setNotis((prev) =>
+      prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)),
+    );
+    try {
+      await apiPatch(`/notifications/${n.id}/read`);
+    } catch {
+      // 읽음 처리 실패는 치명적이지 않음 — 다음 로드에서 동기화
+    }
+  }
+
+  const unreadCount = notis.filter((n) => !n.read).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
@@ -193,70 +275,56 @@ export default function HomePage() {
           </button>
           <div className="noti-wrap" ref={notiRef}>
             <button className="tn-icon" onClick={() => setNotiOpen((v) => !v)}>
-              <span className="dot" />
+              {unreadCount > 0 && <span className="dot" />}
               <i className="ti ti-bell" />
             </button>
             {notiOpen && (
               <div className="noti-dropdown">
                 <div className="nd-head">
                   알림
-                  <span className="nd-badge">5</span>
+                  {unreadCount > 0 && (
+                    <span className="nd-badge">{unreadCount}</span>
+                  )}
                 </div>
                 <div className="nd-divider" />
-                {[
-                  {
-                    icon: "ti ti-clock",
-                    color: "var(--coral)",
-                    text: "박지호님 태스크 2개 기한 초과",
-                    time: "10분 전",
-                    unread: true,
-                  },
-                  {
-                    icon: "ti ti-video",
-                    color: "var(--green)",
-                    text: "캡스톤 팀 A 회의가 시작됐어요",
-                    time: "1시간 전",
-                    unread: true,
-                  },
-                  {
-                    icon: "ti ti-circle-check",
-                    color: "var(--blue)",
-                    text: "이서연님이 액션아이템 완료",
-                    time: "어제",
-                    unread: false,
-                  },
-                  {
-                    icon: "ti ti-user-plus",
-                    color: "var(--amber)",
-                    text: "강민재님이 알고리즘 스터디 합류",
-                    time: "2일 전",
-                    unread: false,
-                  },
-                  {
-                    icon: "ti ti-message",
-                    color: "var(--text-soft)",
-                    text: "마케팅원론 조별과제 새 댓글",
-                    time: "3일 전",
-                    unread: false,
-                  },
-                ].map((n, i) => (
+                {notis.length === 0 && (
                   <div
-                    key={i}
-                    className={`nd-item ${n.unread ? "unread" : ""}`}
+                    style={{
+                      padding: "16px 14px",
+                      fontSize: 12.5,
+                      color: "var(--text-soft)",
+                    }}
                   >
-                    <div
-                      className="nd-icon"
-                      style={{ background: n.color + "22", color: n.color }}
-                    >
-                      <i className={n.icon} />
-                    </div>
-                    <div className="nd-body">
-                      <div className="nd-text">{n.text}</div>
-                      <div className="nd-time">{n.time}</div>
-                    </div>
-                    {n.unread && <div className="nd-dot" />}
+                    새 알림이 없습니다.
                   </div>
-                ))}
+                )}
+                {notis.slice(0, 8).map((n) => {
+                  const st =
+                    NOTI_STYLE[n.type] ?? {
+                      icon: "ti ti-bell",
+                      color: "var(--text-soft)",
+                    };
+                  return (
+                    <div
+                      key={n.id}
+                      className={`nd-item ${!n.read ? "unread" : ""}`}
+                      onClick={() => void readNotification(n)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <div
+                        className="nd-icon"
+                        style={{ background: st.color + "22", color: st.color }}
+                      >
+                        <i className={st.icon} />
+                      </div>
+                      <div className="nd-body">
+                        <div className="nd-text">{n.title}</div>
+                        <div className="nd-time">{relTime(n.created_at)}</div>
+                      </div>
+                      {!n.read && <div className="nd-dot" />}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -306,16 +374,21 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="pd-divider" />
-                <div className="pd-item">
+                <div
+                  className="pd-item"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    setProfileEditOpen(true);
+                  }}
+                >
                   <i className="ti ti-user" /> 프로필 편집
-                </div>
-                <div className="pd-item">
-                  <i className="ti ti-settings" /> 설정
                 </div>
                 <div className="pd-divider" />
                 <div
                   className="pd-item danger"
                   onClick={() => {
+                    // 서버에 로그아웃 통지(향후 refresh token 폐기 대비) — 실패해도 로컬 세션은 정리
+                    void apiPost("/auth/logout").catch(() => {});
                     clearSession();
                     navigate("/");
                   }}
@@ -375,14 +448,26 @@ export default function HomePage() {
                       <span className="lbl">내 기여도</span>
                       <span
                         className="val"
-                        style={{ color: "var(--text-soft)" }}
+                        style={
+                          myContrib.get(team.id) == null
+                            ? { color: "var(--text-soft)" }
+                            : undefined
+                        }
                       >
-                        -%
+                        {myContrib.get(team.id) == null
+                          ? "-%"
+                          : `${myContrib.get(team.id)}%`}
                       </span>
                     </div>
                     <div className="gc-bar">
                       <i
-                        style={{ width: "0%", background: "var(--border-2)" }}
+                        style={{
+                          width: `${myContrib.get(team.id) ?? 0}%`,
+                          background:
+                            myContrib.get(team.id) == null
+                              ? "var(--border-2)"
+                              : color,
+                        }}
                       />
                     </div>
                     <div className="gc-foot">
@@ -452,33 +537,64 @@ export default function HomePage() {
                     </span>
                   </div>
                 ) : (
-                  tasks.map((t, i) => (
-                    <div key={i} className="task-row">
-                      <div className="t-check" onClick={() => completeTask(i)}>
-                        <i className="ti ti-check" />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div className="t-name">{t.name}</div>
-                        <div className="t-meta">
-                          <span className="t-group">{t.group}</span>
-                          <span className={`t-due ${t.dueCls}`}>{t.due}</span>
+                  tasks.map((t) => {
+                    const due = dueInfo(t.due_date);
+                    return (
+                      <div key={t.id} className="task-row">
+                        <div
+                          className="t-check"
+                          onClick={() => void completeTask(t)}
+                        >
+                          <i className="ti ti-check" />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div className="t-name">{t.description}</div>
+                          <div className="t-meta">
+                            <span className="t-group">{t.group}</span>
+                            {due && (
+                              <span className={`t-due ${due.cls}`}>
+                                {due.text}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </Card>
 
             <Card icon="ti ti-activity" title="최근 활동">
               <div style={{ padding: "2px 14px 12px" }}>
-                {ACTIVITY.map((a, i) => (
-                  <div key={i} className="activity-row">
-                    <div className="act-dot" style={{ background: a.color }} />
-                    <div className="act-body">{a.text}</div>
-                    <div className="act-time">{a.time}</div>
+                {notis.length === 0 && (
+                  <div
+                    style={{
+                      padding: "14px 0",
+                      fontSize: 12.5,
+                      color: "var(--text-soft)",
+                    }}
+                  >
+                    아직 활동 기록이 없습니다.
                   </div>
-                ))}
+                )}
+                {notis.slice(0, 4).map((n) => {
+                  const st =
+                    NOTI_STYLE[n.type] ?? {
+                      icon: "ti ti-bell",
+                      color: "var(--text-soft)",
+                    };
+                  return (
+                    <div key={n.id} className="activity-row">
+                      <div
+                        className="act-dot"
+                        style={{ background: st.color }}
+                      />
+                      <div className="act-body">{n.title}</div>
+                      <div className="act-time">{relTime(n.created_at)}</div>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           </div>
@@ -493,66 +609,88 @@ export default function HomePage() {
             <div className="sec-title">
               <i className="ti ti-calendar-event" /> 예정된 회의
             </div>
-            <span className="sec-count">3개</span>
+            <span className="sec-count">{meetings.length}개</span>
           </div>
           <div className="meet-grid">
-            {MEETINGS.map((m, i) => (
+            {meetings.length === 0 && (
               <div
-                key={i}
-                className={`meet ${m.live ? "live" : ""} ${m.soon ? "soon" : ""}`}
-                onClick={() => navigate("/dashboard")}
+                style={{
+                  padding: "16px 4px",
+                  fontSize: 12.5,
+                  color: "var(--text-soft)",
+                }}
               >
-                <div className="meet-top">
-                  {m.live ? (
-                    <span className="badge b-coral">
-                      <span className="live-dot" /> 진행 중
-                    </span>
-                  ) : (
-                    <div className="date-chip">
-                      <span className="d">{m.d}</span>
-                      <span className="m">{m.m}</span>
-                    </div>
-                  )}
-                  <span className={`badge ${m.groupCls}`}>{m.group}</span>
-                </div>
-                <div className="meet-title">{m.title}</div>
-                <div className="meet-meta">
-                  {m.date && (
-                    <span>
-                      <i className="ti ti-calendar" /> {m.date}
-                    </span>
-                  )}
-                  <span>
-                    <i className="ti ti-clock" /> {m.time}
-                  </span>
-                  <span>
-                    <i className="ti ti-users" /> {m.members}명
-                  </span>
-                  {m.agenda && (
-                    <span>
-                      <i className="ti ti-list" /> 아젠다 {m.agenda}
-                    </span>
-                  )}
-                </div>
-                <div className="meet-foot">
-                  {m.live ? (
-                    <button className="btn btn-danger btn-sm btn-full">
-                      <i className="ti ti-arrow-right" /> 회의 참여
-                    </button>
-                  ) : (
-                    <div
-                      className="btn btn-sm btn-full"
-                      style={{ cursor: "default" }}
-                    >
-                      <i className="ti ti-calendar-plus" /> {m.label}
-                    </div>
-                  )}
-                </div>
+                예정된 회의가 없습니다. 그룹 대시보드에서 회의를 만들어 보세요.
               </div>
-            ))}
+            )}
+            {meetings.map((m) => {
+              const live = m.status === "active";
+              const d = new Date(m.scheduled_at);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const dday = Math.round(
+                (new Date(d).setHours(0, 0, 0, 0) - today.getTime()) /
+                  86400000,
+              );
+              const label =
+                dday <= 0 ? "오늘" : dday === 1 ? "내일" : `${dday}일 후`;
+              const time = d.toLocaleTimeString("ko-KR", {
+                hour: "numeric",
+                minute: "2-digit",
+              });
+              return (
+                <div
+                  key={m.id}
+                  className={`meet ${live ? "live" : ""} ${!live && dday <= 2 ? "soon" : ""}`}
+                  onClick={() => navigate(`/dashboard/${m.team_id}/meeting`)}
+                >
+                  <div className="meet-top">
+                    {live ? (
+                      <span className="badge b-coral">
+                        <span className="live-dot" /> 진행 중
+                      </span>
+                    ) : (
+                      <div className="date-chip">
+                        <span className="d">{d.getDate()}</span>
+                        <span className="m">{d.getMonth() + 1}월</span>
+                      </div>
+                    )}
+                    <span className={`badge ${m.groupCls}`}>{m.group}</span>
+                  </div>
+                  <div className="meet-title">
+                    {m.topic ?? "제목 없는 회의"}
+                  </div>
+                  <div className="meet-meta">
+                    <span>
+                      <i className="ti ti-clock" /> {time}
+                    </span>
+                    <span>
+                      <i className="ti ti-hourglass" /> {m.total_minutes}분
+                    </span>
+                  </div>
+                  <div className="meet-foot">
+                    {live ? (
+                      <button className="btn btn-danger btn-sm btn-full">
+                        <i className="ti ti-arrow-right" /> 회의 참여
+                      </button>
+                    ) : (
+                      <div
+                        className="btn btn-sm btn-full"
+                        style={{ cursor: "default" }}
+                      >
+                        <i className="ti ti-calendar-plus" /> {label}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
+      {profileEditOpen && (
+        <ProfileEditModal onClose={() => setProfileEditOpen(false)} />
+      )}
     </div>
   );
 }
