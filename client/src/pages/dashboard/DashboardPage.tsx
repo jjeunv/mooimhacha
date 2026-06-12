@@ -89,7 +89,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div className="dash-shell" style={{ display: "flex", height: "100vh" }}>
       {/* 사이드바 */}
       <aside className="sidebar">
         <button className="sb-back" onClick={() => navigate("/home")}>

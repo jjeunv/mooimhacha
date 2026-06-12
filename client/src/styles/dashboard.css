@@ -1166,3 +1166,42 @@
   color: var(--text-soft);
   margin-top: 4px;
 }
+
+@media print {
+  :root {
+    --ambient: #ffffff;
+    --bg: #ffffff;
+    --surface-2: #ffffff;
+    --surface-3: #f0f0f0;
+  }
+
+  .sidebar,
+  .main-top,
+  .report-wrap > div:first-child {
+    display: none !important;
+  }
+
+  .dash-shell {
+    display: block !important;
+    height: auto !important;
+  }
+
+  .main-area {
+    display: block !important;
+  }
+
+  .main-content {
+    padding: 16px !important;
+    overflow: visible !important;
+  }
+
+  .report-wrap {
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
