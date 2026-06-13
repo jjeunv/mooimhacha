@@ -34,24 +34,27 @@ function dueState(due: string | null): {
   warn: boolean;
   label: string;
   timeLabel: string;
+  dDay: string;
 } {
-  if (!due) return { danger: false, warn: false, label: "", timeLabel: "" };
+  if (!due)
+    return { danger: false, warn: false, label: "", timeLabel: "", dDay: "" };
   const d = new Date(due);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dueDay = new Date(d);
   dueDay.setHours(0, 0, 0, 0);
-  const diff = (dueDay.getTime() - today.getTime()) / 86400000;
-  const label =
-    diff < 0
-      ? "지남"
-      : diff === 0
-        ? "오늘"
-        : diff === 1
-          ? "내일"
-          : `${d.getMonth() + 1}/${d.getDate()}`;
+  const diff = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const label = `${d.getMonth() + 1}/${d.getDate()}(${DAYS[d.getDay()]})`;
   const timeLabel = fmtTime(d);
-  return { danger: diff <= 0, warn: diff >= 1 && diff <= 3, label, timeLabel };
+  const dDay = diff < 0 ? `D+${Math.abs(diff)}` : `D-${diff}`;
+  return {
+    danger: diff <= 0,
+    warn: diff >= 1 && diff <= 3,
+    label,
+    timeLabel,
+    dDay,
+  };
 }
 
 function fmtTime(d: Date): string {
@@ -187,14 +190,17 @@ export default function TasksPage() {
     setEditTarget(task);
     setEditDesc(task.description);
     setEditAssignee(task.assignee_id ? String(task.assignee_id) : "");
-    setEditDue(task.due_date?.slice(0, 10) ?? "");
-    if (!task.due_date || task.due_date.endsWith("T00:00:00.000Z")) {
-      setEditTime("");
-    } else {
+    if (task.due_date) {
       const dt = new Date(task.due_date);
+      setEditDue(
+        `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`,
+      );
       setEditTime(
         `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`,
       );
+    } else {
+      setEditDue("");
+      setEditTime("");
     }
     setEditStatus(API_TO_STATUS[task.status] ?? "할 일");
     setEditDifficulty(task.difficulty ?? 2);
@@ -210,7 +216,7 @@ export default function TasksPage() {
     try {
       await apiPatch(`/action-items/${editTarget.id}`, {
         description: editDesc.trim(),
-        assignee_id: editAssignee ? Number(editAssignee) : undefined,
+        assignee_id: editAssignee ? Number(editAssignee) : null,
         due_date: editDue
           ? new Date(`${editDue}T${editTime || "23:59"}`).toISOString()
           : undefined,
@@ -463,6 +469,11 @@ export default function TasksPage() {
                                 {dd.timeLabel}
                               </span>
                             )}
+                            {dd.dDay && (
+                              <span style={{ fontWeight: 700, marginLeft: 4 }}>
+                                {dd.dDay}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
@@ -519,9 +530,19 @@ export default function TasksPage() {
                 <div
                   className={`lrow-due ${danger ? "due-red" : warn ? "due-amber" : "due-soft"}`}
                 >
-                  {dd.label
-                    ? `${dd.label}${dd.timeLabel ? ` ${dd.timeLabel}` : ""}`
-                    : "기한 없음"}
+                  {dd.label ? (
+                    <>
+                      {dd.label}
+                      {dd.timeLabel && ` ${dd.timeLabel}`}
+                      {dd.dDay && (
+                        <span style={{ fontWeight: 700, marginLeft: 5 }}>
+                          {dd.dDay}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    "기한 없음"
+                  )}
                 </div>
                 <span className="tc-diff">
                   {"★".repeat(t.difficulty ?? 1)}
