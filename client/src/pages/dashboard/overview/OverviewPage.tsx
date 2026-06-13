@@ -36,12 +36,16 @@ function taskDueLabel(
   if (!due) return null;
   const d = new Date(due);
   const isPast = d < new Date();
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
   const m = d.getMonth() + 1;
   const day = d.getDate();
+  const dow = DAYS[d.getDay()];
   const h = d.getHours();
   const min = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h < 12 ? "오전" : "오후";
+  const h12 = h % 12 || 12;
   return {
-    text: `${m}/${day} ${h}:${min}`,
+    text: `${m}/${day}(${dow}) ${ampm} ${h12}:${min}`,
     color: isPast ? "var(--coral)" : "var(--text-soft)",
   };
 }
