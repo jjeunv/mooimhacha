@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import Card from "@/components/Card";
 import { apiGet, apiPatch } from "@/lib/api";
+import { getUser } from "@/lib/auth";
 import type { ActionItem, Meeting, TeamContribution } from "@/lib/types";
 import type { TeamContext } from "../DashboardPage";
 
@@ -79,6 +80,7 @@ function meetingDateLabel(m: Meeting): string {
 export default function OverviewPage() {
   const navigate = useNavigate();
   const team = useOutletContext<TeamContext | null>();
+  const currentUser = getUser();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [contrib, setContrib] = useState<TeamContribution[]>([]);
   const [tasks, setTasks] = useState<ActionItem[]>([]);
@@ -113,8 +115,12 @@ export default function OverviewPage() {
     const visible = tasks.filter((t) => t.status !== "cancelled");
     const done = visible.filter((t) => t.status === "done");
     const open = visible.filter((t) => t.status !== "done");
+    const now = new Date();
+    const overdue = open.filter(
+      (t) => t.due_date && new Date(t.due_date) < now,
+    );
     const nextDue = open
-      .filter((t) => t.due_date)
+      .filter((t) => t.due_date && t.assignee_id === currentUser?.id)
       .sort(
         (a, b) =>
           new Date(a.due_date as string).getTime() -
@@ -146,6 +152,7 @@ export default function OverviewPage() {
       visible,
       done,
       open,
+      overdue,
       nextDue,
       urgent,
       nameById,
@@ -214,12 +221,12 @@ export default function OverviewPage() {
             sub: "이번 프로젝트",
           },
           {
-            lbl: "태스크 진행률",
+            lbl: "총 태스크 진행률",
             val: `${taskPct}%`,
             sub: `${derived.done.length} / ${derived.visible.length} 완료`,
           },
           {
-            lbl: "다음 마감 태스크",
+            lbl: "내 다음 마감 태스크",
             val: nextDueInfo?.text ?? "—",
             sub: derived.nextDue?.due_date
               ? `${new Date(derived.nextDue.due_date).getMonth() + 1}/${new Date(derived.nextDue.due_date).getDate()} · ${derived.nextDue.description ?? ""}`
@@ -228,6 +235,14 @@ export default function OverviewPage() {
               fontSize: 20,
               paddingTop: 8,
               color: nextDueInfo?.color,
+            },
+          },
+          {
+            lbl: "기한 초과 태스크",
+            val: `${derived.overdue.length}개`,
+            sub: derived.overdue[0]?.description ?? "기한 초과 없음",
+            valStyle: {
+              color: derived.overdue.length ? "var(--coral)" : "var(--green)",
             },
           },
         ].map((s) => (
