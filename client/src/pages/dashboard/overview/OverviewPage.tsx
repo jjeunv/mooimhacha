@@ -52,10 +52,11 @@ function taskDueLabel(
 
 function dDayText(due: string | null): { text: string; color: string } | null {
   if (!due) return null;
-  const d = new Date(due);
+  const dueDay = new Date(due);
+  dueDay.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const diff = Math.round((d.getTime() - today.getTime()) / 86400000);
+  const diff = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
   if (diff < 0) return { text: `D+${Math.abs(diff)}`, color: "var(--coral)" };
   if (diff === 0) return { text: "D-0", color: "var(--coral)" };
   return {
