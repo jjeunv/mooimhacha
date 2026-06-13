@@ -6,7 +6,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { TeamsModule } from './teams/teams.module';
-import { ContributionModule } from './contribution/contribution.module';
 import { ContributionsModule } from './contributions/contributions.module';
 import { MeetingsModule } from './meetings/meetings.module';
 import { ReportsModule } from './reports/reports.module';
@@ -38,7 +37,6 @@ import { buildTypeOrmOptions } from './data-source';
     }),
     AuthModule,
     TeamsModule,
-    ContributionModule,
     ContributionsModule,
     MeetingsModule,
     ReportsModule,
