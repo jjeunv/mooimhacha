@@ -10,17 +10,18 @@ const MAX_OUTPUT_TOKENS = 2000;
 // 429/5xx 일시 오류 재시도 백오프
 const RETRY_BACKOFF_MS = 2000;
 
-// GPT-4o-mini 호출 래퍼. 회의 중 안건 요약(안건당 1회) + 회의 후 종합 정리·다음 회의 안건 생성.
-// OPENAI_API_KEY 미설정 시 호출을 건너뛰고 null 을 반환해 흐름이 끊기지 않게 한다.
+// Groq (llama-3.3-70b) 호출 래퍼 (OpenAI 호환 엔드포인트 사용).
+// 회의 중 안건 요약(안건당 1회) + 회의 후 종합 정리·다음 회의 안건 생성.
+// GROQ_API_KEY 미설정 시 호출을 건너뛰고 null 을 반환해 흐름이 끊기지 않게 한다.
 @Injectable()
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
-  private readonly model = 'gpt-4o-mini';
+  private readonly model = 'llama-3.3-70b-versatile';
 
   constructor(private config: ConfigService) {}
 
   get enabled(): boolean {
-    return !!this.config.get<string>('OPENAI_API_KEY');
+    return !!this.config.get<string>('GROQ_API_KEY');
   }
 
   // 완료된 안건의 발화들을 한국어로 3~5문장 요약
@@ -51,6 +52,7 @@ export class LlmService {
     const prompt =
       '아래 회의 자료(안건별 요약·회의록·수동 입력된 결정·액션)를 바탕으로 회의를 종합 정리해라.\n' +
       '반드시 아래 JSON 형식만 출력한다.\n' +
+      'summary 필드는 마크다운 형식의 상세 회의록으로 작성한다 — ## 제목, ### 안건, **굵게**, 불릿 리스트 등을 활용해 회의 전체 내용을 빠짐없이 정리한다.\n' +
       '{"summary": string, ' +
       '"missed_decisions": [{"content": string, "source_utterance_id": number|null}], ' +
       '"tasks": [{"description": string, "assignee_hint": string|null, "source_utterance_id": number|null}]}\n\n' +
@@ -134,7 +136,7 @@ export class LlmService {
 
   private async chat(system: string, user: string): Promise<string | null> {
     if (!this.enabled) {
-      this.logger.warn('OPENAI_API_KEY 미설정 — LLM 호출을 건너뜁니다.');
+      this.logger.warn('GROQ_API_KEY 미설정 — LLM 호출을 건너뜁니다.');
       return null;
     }
     // 429/5xx 일시 오류만 1회 재시도. 동기 HTTP 응답 안에서 도는 호출이라
@@ -154,12 +156,14 @@ export class LlmService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.get<string>('OPENAI_API_KEY')}`,
-        },
+      const res = await fetch(
+        `https://api.groq.com/openai/v1/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.config.get<string>('GROQ_API_KEY')}`,
+          },
         body: JSON.stringify({
           model: this.model,
           messages: [
@@ -172,10 +176,11 @@ export class LlmService {
         signal: controller.signal,
       });
       if (!res.ok) {
-        this.logger.error(`OpenAI 응답 오류: ${res.status}`);
+        const body = await res.text().catch(() => '');
+        this.logger.error(`Groq 응답 오류: ${res.status} — ${body}`);
         return {
           content: null,
-          retryable: res.status === 429 || res.status >= 500,
+          retryable: res.status >= 500,
         };
       }
       const data = (await res.json()) as {
@@ -186,7 +191,7 @@ export class LlmService {
         retryable: false,
       };
     } catch (e) {
-      this.logger.error('OpenAI 호출 실패 또는 타임아웃', e as Error);
+      this.logger.error('Groq 호출 실패 또는 타임아웃', e as Error);
       return { content: null, retryable: false };
     } finally {
       clearTimeout(timeout);
