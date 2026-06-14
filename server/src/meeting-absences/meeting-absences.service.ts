@@ -226,6 +226,47 @@ export class MeetingAbsencesService {
     };
   }
 
+  // 내가 아직 동의하지 않은 팀 결석 사유 목록 (홈 알림용)
+  async getPendingConsents(userId: number, teamId: number) {
+    await this.teamsService.requireMembership(userId, teamId);
+
+    const meetings = await this.meetingRepo.find({
+      where: { team_id: teamId, status: 'ended' },
+    });
+    if (meetings.length === 0) return [];
+
+    const meetingIds = meetings.map((m) => m.id);
+    const meetingById = new Map(meetings.map((m) => [Number(m.id), m]));
+
+    const absences = await this.absenceRepo.find({
+      where: { meeting_id: In(meetingIds), status: 'pending' },
+    });
+    const others = absences.filter((a) => Number(a.user_id) !== userId);
+    if (others.length === 0) return [];
+
+    const myConsents = await this.consentRepo.find({
+      where: { absence_id: In(others.map((a) => a.id)), voter_id: userId },
+    });
+    const consented = new Set(myConsents.map((c) => Number(c.absence_id)));
+    const pending = others.filter((a) => !consented.has(Number(a.id)));
+    if (pending.length === 0) return [];
+
+    const members = await this.teamsService.getMembers(teamId);
+    const nameById = new Map(members.map((m) => [m.user_id, m.name]));
+
+    return pending
+      .sort((a, b) => a.created_at.getTime() - b.created_at.getTime())
+      .map((a) => ({
+        absence_id: Number(a.id),
+        meeting_id: Number(a.meeting_id),
+        meeting_topic:
+          meetingById.get(Number(a.meeting_id))?.topic ?? '제목 없는 회의',
+        user_name: nameById.get(Number(a.user_id)) ?? '알 수 없음',
+        reason: a.reason,
+        created_at: a.created_at.toISOString(),
+      }));
+  }
+
   // 동의 취소 — pending 상태일 때만 가능
   async cancelConsent(userId: number, absenceId: number) {
     const absence = await this.absenceRepo.findOne({

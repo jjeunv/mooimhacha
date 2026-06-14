@@ -22,6 +22,15 @@ import { CreateAbsenceDto } from './dto/create-absence.dto';
 export class MeetingAbsencesController {
   constructor(private absencesService: MeetingAbsencesService) {}
 
+  @Get('teams/:id/pending-consents')
+  @ApiOperation({ summary: '내가 미동의한 팀 결석 사유 목록 (홈 알림용)' })
+  pendingConsents(
+    @Request() req: { user: User },
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.absencesService.getPendingConsents(req.user.id, id);
+  }
+
   @Get('teams/:id/attendance-summary')
   @ApiOperation({
     summary: '팀 회의 출결 요약 (목록용 — 내 출결 + 미처리 동의 수)',
