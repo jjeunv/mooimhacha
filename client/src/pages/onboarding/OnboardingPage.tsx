@@ -4,6 +4,24 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
 
+// 그룹 생성 시 함께 지정하는 팀 설정 — 값은 서버 TeamSettings 엔티티 default 와 일치.
+// 기본값에서 바뀐 항목만 생성 직후 PATCH /teams/:id/settings 로 저장한다.
+interface OnboardingSettings {
+  contribution_visibility: "team" | "self" | "leader";
+  absent_meeting_handling: "exclude" | "zero" | "attendance_only";
+  deadline_penalty_curve: "standard" | "lenient" | "strict";
+  min_meeting_minutes: number;
+  leader_bonus_multiplier: number;
+}
+
+const DEFAULT_SETTINGS: OnboardingSettings = {
+  contribution_visibility: "team",
+  absent_meeting_handling: "exclude",
+  deadline_penalty_curve: "standard",
+  min_meeting_minutes: 5,
+  leader_bonus_multiplier: 1.0,
+};
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -14,6 +32,11 @@ export default function OnboardingPage() {
   const [inviteCode, setInviteCode] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 팀 설정 접이식 — 기본 접힘. 펼쳐서 바꾼 값만 생성 후 PATCH 한다.
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<OnboardingSettings>({
+    ...DEFAULT_SETTINGS,
+  });
 
   async function copyCode() {
     try {
@@ -57,6 +80,30 @@ export default function OnboardingPage() {
           course_name: selectedChip || "기타",
         }),
       });
+
+      // 기본값에서 바뀐 팀 설정만 저장 — 서버 계약(PATCH settings) 재사용, 생성 API 는 그대로.
+      const changed = Object.fromEntries(
+        Object.entries(settings).filter(
+          ([k, v]) => v !== DEFAULT_SETTINGS[k as keyof OnboardingSettings],
+        ),
+      );
+      if (Object.keys(changed).length > 0) {
+        try {
+          await apiFetch(`/api/teams/${data.id}/settings`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeader(),
+            },
+            body: JSON.stringify(changed),
+          });
+        } catch {
+          showToast(
+            "설정은 저장하지 못했어요 — 설정 페이지에서 다시 조정해 주세요",
+            "error",
+          );
+        }
+      }
 
       setInviteCode(data.invite_code);
       setTeamId(data.id);
@@ -167,6 +214,124 @@ export default function OnboardingPage() {
                     <option>6명 이상</option>
                   </select>
                 </div>
+              </div>
+
+              {/* 팀 설정 — 기본 접힘. 바꾼 값만 생성 직후 저장된다 (나중에 설정 페이지에서 변경 가능). */}
+              <div className="ob-settings">
+                <button
+                  type="button"
+                  className="ob-settings-toggle"
+                  onClick={() => setShowSettings((v) => !v)}
+                  aria-expanded={showSettings}
+                >
+                  <i
+                    className={`ti ti-chevron-${showSettings ? "down" : "right"}`}
+                  />
+                  팀 설정 <span className="opt">(선택)</span>
+                </button>
+                {showSettings && (
+                  <div className="ob-settings-body">
+                    <div className="field">
+                      <label className="field-label">기여도 공개 범위</label>
+                      <select
+                        className="input"
+                        value={settings.contribution_visibility}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            contribution_visibility: e.target
+                              .value as OnboardingSettings["contribution_visibility"],
+                          }))
+                        }
+                      >
+                        <option value="team">전체 팀원 공개</option>
+                        <option value="self">본인만 열람</option>
+                        <option value="leader">팀장만 열람</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">무단결석 처리</label>
+                      <select
+                        className="input"
+                        value={settings.absent_meeting_handling}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            absent_meeting_handling: e.target
+                              .value as OnboardingSettings["absent_meeting_handling"],
+                          }))
+                        }
+                      >
+                        <option value="exclude">
+                          해당 회의 기여도 집계 제외
+                        </option>
+                        <option value="zero">기여도 0점 처리</option>
+                        <option value="attendance_only">출석 점수만 차감</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">마감 패널티</label>
+                      <select
+                        className="input"
+                        value={settings.deadline_penalty_curve}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            deadline_penalty_curve: e.target
+                              .value as OnboardingSettings["deadline_penalty_curve"],
+                          }))
+                        }
+                      >
+                        <option value="standard">표준</option>
+                        <option value="lenient">완화</option>
+                        <option value="strict">엄격</option>
+                      </select>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label className="field-label">최소 회의 시간 (분)</label>
+                        <input
+                          className="input"
+                          type="number"
+                          min={1}
+                          max={240}
+                          value={settings.min_meeting_minutes}
+                          onChange={(e) =>
+                            setSettings((s) => ({
+                              ...s,
+                              // 빈 입력은 기본값(5)으로 폴백 — 0은 서버 @Min(1) 위반
+                              min_meeting_minutes:
+                                e.target.value === ""
+                                  ? DEFAULT_SETTINGS.min_meeting_minutes
+                                  : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="field-label">팀장 보너스 배율</label>
+                        <input
+                          className="input"
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={settings.leader_bonus_multiplier}
+                          onChange={(e) =>
+                            setSettings((s) => ({
+                              ...s,
+                              // 빈 입력은 기본값(1.0)으로 폴백 — 명시적 0은 유효(보너스 없음)
+                              leader_bonus_multiplier:
+                                e.target.value === ""
+                                  ? DEFAULT_SETTINGS.leader_bonus_multiplier
+                                  : Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="ob-foot">
