@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
 import { useOutletContext } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import Modal from "@/components/Modal";
@@ -1052,19 +1053,55 @@ export default function MeetingPage() {
                 {/* 회의 요약 */}
                 {tab === "summary" && (
                   <div className="tab-panel active">
-                    {selected.summary ? (
-                      <div
-                        className="summary-box"
-                        style={{ whiteSpace: "pre-wrap" }}
-                      >
-                        <i className="ti ti-sparkles" />
-                        {selected.summary}
-                      </div>
-                    ) : (
+                    {selected.status !== "ended" ? (
                       <div className="summary-box">
                         <i className="ti ti-sparkles" />
                         회의가 종료되면 AI가 자동으로
                         결정사항·액션아이템·회의록을 요약합니다.
+                      </div>
+                    ) : (
+                      <div className="summary-section">
+                        <div className="summary-header">
+                          <div className="summary-title">
+                            <i className="ti ti-sparkles" />
+                            AI 회의록
+                          </div>
+                          <button
+                            className="btn btn-sm"
+                            disabled={busy}
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                const res = await apiPost<{ summarized: boolean; reason?: string }>(
+                                  `/meetings/${selectedId}/summarize`,
+                                );
+                                if (!res.summarized) {
+                                  showToast(res.reason === "llm_not_configured" ? "API 키가 설정되지 않았습니다." : "요약에 실패했어요. 다시 시도해 주세요.", "error");
+                                } else {
+                                  await loadMeetings();
+                                  showToast("회의가 요약됐습니다.");
+                                }
+                              } catch (e) {
+                                showToast((e as Error).message, "error");
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            <i className={`ti ${busy ? "ti-loader-2" : "ti-refresh"}`} />
+                            {busy ? "요약 중…" : selected.summary ? "다시 요약" : "요약 생성"}
+                          </button>
+                        </div>
+                        {selected.summary ? (
+                          <div className="summary-md">
+                            <ReactMarkdown>{selected.summary}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div className="summary-empty">
+                            <i className="ti ti-file-description" />
+                            <span>발화 기록과 결정 사항을 바탕으로 AI가 회의록을 작성합니다.</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
