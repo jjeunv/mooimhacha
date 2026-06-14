@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/useToast";
 import Modal from "@/components/Modal";
 import ConfirmModal from "@/components/ConfirmModal";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { openCompanion } from "@/lib/companion";
 import type {
   Agenda,
   Decision,
@@ -71,12 +72,13 @@ export default function MeetingPage() {
   const [newTopic, setNewTopic] = useState("");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("15:00");
-  const [newMinutes, setNewMinutes] = useState(30);
+  // 입력 중 빈 값을 허용하기 위해 ""도 담는다 — 제출 시 기본값으로 보정
+  const [newMinutes, setNewMinutes] = useState<number | "">(30);
   const [newAgendas, setNewAgendas] = useState("");
 
   // 아젠다 모달 입력값
   const [agTitle, setAgTitle] = useState("");
-  const [agMinutes, setAgMinutes] = useState(10);
+  const [agMinutes, setAgMinutes] = useState<number | "">(10);
 
   const selected = meetings.find((m) => m.id === selectedId) ?? null;
 
@@ -238,7 +240,7 @@ export default function MeetingPage() {
       const created = await apiPost<Meeting>("/meetings", {
         team_id: team.id,
         scheduled_at: new Date(`${newDate}T${newTime}:00`).toISOString(),
-        total_minutes: newMinutes,
+        total_minutes: newMinutes || 30,
         topic: newTopic.trim() || undefined,
       });
       // 줄바꿈으로 입력한 아젠다를 순서대로 등록
@@ -273,12 +275,37 @@ export default function MeetingPage() {
     try {
       await apiPost(`/meetings/${selectedId}/agendas`, {
         title: agTitle.trim(),
-        estimated_minutes: agMinutes,
+        estimated_minutes: agMinutes || 10,
       });
       setAgendas(await apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`));
       setModalOpen(null);
       setAgTitle("");
       showToast("아젠다가 추가되었습니다");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 회의 시작 — 서버가 호출 시점을 t0_timestamp(시각 동기화 기준점)로 저장한다
+  async function startMeeting() {
+    if (!selected || !team || busy) return;
+    setBusy(true);
+    try {
+      await apiPost(`/meetings/${selected.id}/start`);
+      // 시작자도 바로 참여(출석)되도록 회의 창을 즉시 연다 — 런처와 동일 동작.
+      // 출석은 회의 창이 WS meeting:join 을 보내는 시점에 기록된다.
+      const win = openCompanion(selected.id, team.id);
+      if (!window.mooimhacha?.isElectron && win === null) {
+        showToast(
+          "회의는 시작됐지만 팝업이 차단됐어요. 회의실 탭에서 회의 창을 다시 열어주세요.",
+          "error",
+        );
+      } else {
+        showToast("회의가 시작되었습니다");
+      }
+      await loadMeetings();
     } catch (e) {
       showToast((e as Error).message, "error");
     } finally {
@@ -407,6 +434,15 @@ export default function MeetingPage() {
                   <div className="mdh-title">
                     {selected.topic ?? "제목 없는 회의"}
                   </div>
+                  {selected.status === "scheduled" && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void startMeeting()}
+                      disabled={busy}
+                    >
+                      <i className="ti ti-player-play" /> 회의 시작
+                    </button>
+                  )}
                   {selected.status === "active" && (
                     <button
                       className="btn btn-danger btn-sm"
@@ -731,7 +767,11 @@ export default function MeetingPage() {
               type="number"
               min={5}
               value={newMinutes}
-              onChange={(e) => setNewMinutes(Number(e.target.value) || 30)}
+              onChange={(e) =>
+                setNewMinutes(
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
             />
           </div>
           <div className="field">
@@ -845,7 +885,9 @@ export default function MeetingPage() {
               type="number"
               min={1}
               value={agMinutes}
-              onChange={(e) => setAgMinutes(Number(e.target.value) || 10)}
+              onChange={(e) =>
+                setAgMinutes(e.target.value === "" ? "" : Number(e.target.value))
+              }
             />
           </div>
         </Modal>
