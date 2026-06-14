@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import Modal from "@/components/Modal";
-import { apiGet, apiPost } from "@/lib/api";
+import ConfirmModal from "@/components/ConfirmModal";
+import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
+import { openCompanion } from "@/lib/companion";
 import type {
   Agenda,
   Decision,
@@ -56,6 +58,11 @@ export default function MeetingPage() {
   const [modalOpen, setModalOpen] = useState<
     "meeting" | "decision" | "agenda" | null
   >(null);
+  // 결정 수정/삭제 대상 — 수정은 결정 모달을 재사용, 삭제는 확인 모달을 띄운다.
+  const [editingDecision, setEditingDecision] = useState<Decision | null>(null);
+  const [deletingDecision, setDeletingDecision] = useState<Decision | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   // 발언 탭 최초 진입 시 바 애니메이션을 한 번만 실행하기 위한 플래그.
   // state 대신 ref를 쓰는 이유: 값 변경이 리렌더를 유발할 필요 없음.
@@ -65,12 +72,13 @@ export default function MeetingPage() {
   const [newTopic, setNewTopic] = useState("");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("15:00");
-  const [newMinutes, setNewMinutes] = useState(30);
+  // 입력 중 빈 값을 허용하기 위해 ""도 담는다 — 제출 시 기본값으로 보정
+  const [newMinutes, setNewMinutes] = useState<number | "">(30);
   const [newAgendas, setNewAgendas] = useState("");
 
   // 아젠다 모달 입력값
   const [agTitle, setAgTitle] = useState("");
-  const [agMinutes, setAgMinutes] = useState(10);
+  const [agMinutes, setAgMinutes] = useState<number | "">(10);
 
   const selected = meetings.find((m) => m.id === selectedId) ?? null;
 
@@ -167,7 +175,8 @@ export default function MeetingPage() {
     ":" +
     String(s % 60).padStart(2, "0");
 
-  async function addDecision() {
+  // 추가/수정 겸용 — editingDecision이 있으면 PATCH, 없으면 POST
+  async function saveDecision() {
     if (!decInput.trim()) {
       showToast("결정 내용을 입력해주세요");
       return;
@@ -175,16 +184,44 @@ export default function MeetingPage() {
     if (!selectedId || busy) return;
     setBusy(true);
     try {
-      await apiPost("/decisions", {
-        meeting_id: selectedId,
-        content: decInput.trim(),
-      });
+      if (editingDecision) {
+        await apiPatch(`/decisions/${editingDecision.id}`, {
+          content: decInput.trim(),
+        });
+      } else {
+        await apiPost("/decisions", {
+          meeting_id: selectedId,
+          content: decInput.trim(),
+        });
+      }
       setDecisions(
         await apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`),
       );
       setDecInput("");
       setModalOpen(null);
-      showToast("결정 사항이 추가되었습니다");
+      showToast(
+        editingDecision
+          ? "결정 사항이 수정되었습니다"
+          : "결정 사항이 추가되었습니다",
+      );
+      setEditingDecision(null);
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteDecision() {
+    if (!deletingDecision || busy) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/decisions/${deletingDecision.id}`);
+      setDecisions((prev) =>
+        prev.filter((d) => d.id !== deletingDecision.id),
+      );
+      setDeletingDecision(null);
+      showToast("결정 사항이 삭제되었습니다");
     } catch (e) {
       showToast((e as Error).message, "error");
     } finally {
@@ -203,7 +240,7 @@ export default function MeetingPage() {
       const created = await apiPost<Meeting>("/meetings", {
         team_id: team.id,
         scheduled_at: new Date(`${newDate}T${newTime}:00`).toISOString(),
-        total_minutes: newMinutes,
+        total_minutes: newMinutes || 30,
         topic: newTopic.trim() || undefined,
       });
       // 줄바꿈으로 입력한 아젠다를 순서대로 등록
@@ -238,12 +275,37 @@ export default function MeetingPage() {
     try {
       await apiPost(`/meetings/${selectedId}/agendas`, {
         title: agTitle.trim(),
-        estimated_minutes: agMinutes,
+        estimated_minutes: agMinutes || 10,
       });
       setAgendas(await apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`));
       setModalOpen(null);
       setAgTitle("");
       showToast("아젠다가 추가되었습니다");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 회의 시작 — 서버가 호출 시점을 t0_timestamp(시각 동기화 기준점)로 저장한다
+  async function startMeeting() {
+    if (!selected || !team || busy) return;
+    setBusy(true);
+    try {
+      await apiPost(`/meetings/${selected.id}/start`);
+      // 시작자도 바로 참여(출석)되도록 회의 창을 즉시 연다 — 런처와 동일 동작.
+      // 출석은 회의 창이 WS meeting:join 을 보내는 시점에 기록된다.
+      const win = openCompanion(selected.id, team.id);
+      if (!window.mooimhacha?.isElectron && win === null) {
+        showToast(
+          "회의는 시작됐지만 팝업이 차단됐어요. 회의실 탭에서 회의 창을 다시 열어주세요.",
+          "error",
+        );
+      } else {
+        showToast("회의가 시작되었습니다");
+      }
+      await loadMeetings();
     } catch (e) {
       showToast((e as Error).message, "error");
     } finally {
@@ -372,6 +434,15 @@ export default function MeetingPage() {
                   <div className="mdh-title">
                     {selected.topic ?? "제목 없는 회의"}
                   </div>
+                  {selected.status === "scheduled" && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void startMeeting()}
+                      disabled={busy}
+                    >
+                      <i className="ti ti-player-play" /> 회의 시작
+                    </button>
+                  )}
                   {selected.status === "active" && (
                     <button
                       className="btn btn-danger btn-sm"
@@ -566,7 +637,11 @@ export default function MeetingPage() {
                       <button
                         className="btn btn-primary btn-sm"
                         style={{ marginLeft: "auto" }}
-                        onClick={() => setModalOpen("decision")}
+                        onClick={() => {
+                          setEditingDecision(null);
+                          setDecInput("");
+                          setModalOpen("decision");
+                        }}
                       >
                         <i className="ti ti-plus" /> 추가
                       </button>
@@ -582,6 +657,26 @@ export default function MeetingPage() {
                           <i className="ti ti-check" />
                         </div>
                         <div className="dec-text">{d.content}</div>
+                        <div className="dec-actions">
+                          <button
+                            className="dec-act"
+                            aria-label="결정 수정"
+                            onClick={() => {
+                              setEditingDecision(d);
+                              setDecInput(d.content);
+                              setModalOpen("decision");
+                            }}
+                          >
+                            <i className="ti ti-pencil" />
+                          </button>
+                          <button
+                            className="dec-act dec-act--danger"
+                            aria-label="결정 삭제"
+                            onClick={() => setDeletingDecision(d)}
+                          >
+                            <i className="ti ti-trash" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -672,7 +767,11 @@ export default function MeetingPage() {
               type="number"
               min={5}
               value={newMinutes}
-              onChange={(e) => setNewMinutes(Number(e.target.value) || 30)}
+              onChange={(e) =>
+                setNewMinutes(
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
             />
           </div>
           <div className="field">
@@ -690,22 +789,31 @@ export default function MeetingPage() {
         </Modal>
       )}
 
-      {/* 결정 사항 모달 */}
+      {/* 결정 사항 모달 (추가/수정 겸용) */}
       {modalOpen === "decision" && (
         <Modal
-          title="결정 사항 추가"
-          onClose={() => setModalOpen(null)}
+          title={editingDecision ? "결정 사항 수정" : "결정 사항 추가"}
+          onClose={() => {
+            setModalOpen(null);
+            setEditingDecision(null);
+          }}
           actions={
             <>
-              <button className="btn" onClick={() => setModalOpen(null)}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setModalOpen(null);
+                  setEditingDecision(null);
+                }}
+              >
                 취소
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => void addDecision()}
+                onClick={() => void saveDecision()}
                 disabled={busy}
               >
-                추가
+                {editingDecision ? "저장" : "추가"}
               </button>
             </>
           }
@@ -721,6 +829,24 @@ export default function MeetingPage() {
             />
           </div>
         </Modal>
+      )}
+
+      {/* 결정 삭제 확인 모달 */}
+      {deletingDecision && (
+        <ConfirmModal
+          title="결정 사항 삭제"
+          message={
+            <>
+              “{deletingDecision.content}”
+              <br />이 결정을 삭제할까요? 되돌릴 수 없습니다.
+            </>
+          }
+          confirmLabel="삭제"
+          danger
+          busy={busy}
+          onConfirm={() => void deleteDecision()}
+          onClose={() => setDeletingDecision(null)}
+        />
       )}
 
       {/* 아젠다 모달 */}
@@ -759,7 +885,9 @@ export default function MeetingPage() {
               type="number"
               min={1}
               value={agMinutes}
-              onChange={(e) => setAgMinutes(Number(e.target.value) || 10)}
+              onChange={(e) =>
+                setAgMinutes(e.target.value === "" ? "" : Number(e.target.value))
+              }
             />
           </div>
         </Modal>
