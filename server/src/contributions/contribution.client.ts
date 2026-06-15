@@ -181,9 +181,12 @@ export class ContributionClient {
       return data;
     } catch (e) {
       if (e instanceof ServiceUnavailableException) throw e;
-      const err = e as Error & { cause?: Error };
+      const err = e as Error & { cause?: Error & { code?: string } };
+      const cause = err.cause
+        ? ` | cause: ${err.cause.code ?? ''} ${err.cause.message ?? ''} ${String(err.cause)}`.trim()
+        : '';
       this.logger.error(
-        `← 연결 실패 ${path} (${Date.now() - t0}ms): ${err.message}${err.cause ? ` | cause: ${err.cause.message}` : ''}`,
+        `← 연결 실패 ${path} (${Date.now() - t0}ms): ${err.message}${cause}`,
       );
       throw new ServiceUnavailableException(
         '기여도 산정 서버에 연결할 수 없습니다.',
