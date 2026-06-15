@@ -513,6 +513,14 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         );
       });
   };
+  const broadcast = (
+    type: "agenda:added" | "decision:added" | "action:added",
+  ) => {
+    const ch = createCompanionChannel();
+    ch.postMessage({ type, meeting_id: meetingId });
+    ch.close();
+  };
+
   const handleAddAgenda = async (title: string) => {
     try {
       const created = await apiPost<Agenda>(`/meetings/${meetingId}/agendas`, {
@@ -520,6 +528,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         source: "ad_hoc",
       });
       setAgendas((prev) => [...prev, created]);
+      broadcast("agenda:added");
     } catch {
       // 회의 중 사소한 쓰기 실패 — 풀스크린 에러 대신 인라인 배너로 회의 화면 보존
       setWsIssue("안건을 추가하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -532,6 +541,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
     if (!s) return false;
     try {
       await addDecision(s, { meeting_id: meetingId, content });
+      broadcast("decision:added");
       return true;
     } catch {
       lateArrivalRef.current = { kind: "decision", text: content };
@@ -555,6 +565,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         team_id: teamId,
         ...payload,
       });
+      broadcast("action:added");
       return true;
     } catch {
       lateArrivalRef.current = { kind: "action", text: payload.description };

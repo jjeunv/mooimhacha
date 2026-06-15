@@ -6,7 +6,7 @@ import Modal from "@/components/Modal";
 import ConfirmModal from "@/components/ConfirmModal";
 import HeadsetGateModal from "@/components/HeadsetGateModal";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
-import { openCompanion } from "@/lib/companion";
+import { openCompanion, createCompanionChannel } from "@/lib/companion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type {
   Agenda,
@@ -156,6 +156,26 @@ export default function MeetingPage() {
   useEffect(() => {
     void loadMeetings();
   }, [loadMeetings]);
+
+  // companion 창 이벤트 → 대시보드 즉시 갱신
+  useEffect(() => {
+    const ch = createCompanionChannel();
+    ch.onmessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string };
+      if (msg.type === "meeting:ended") {
+        void loadMeetings();
+      } else if (msg.type === "agenda:added" && selectedId) {
+        void apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`)
+          .then(setAgendas)
+          .catch(() => {});
+      } else if (msg.type === "decision:added" && selectedId) {
+        void apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`)
+          .then(setDecisions)
+          .catch(() => {});
+      }
+    };
+    return () => ch.close();
+  }, [loadMeetings, selectedId]);
 
   // 회의 목록 출결 요약 — 카드 배지·미처리 표시용 (부가 정보라 실패는 조용히 무시)
   const loadSummaries = useCallback(async () => {

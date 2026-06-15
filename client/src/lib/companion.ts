@@ -59,7 +59,10 @@ const CHANNEL_NAME = "mooimhacha-meeting";
 
 export type CompanionMessage =
   | { type: "meeting:ended"; meeting_id: number }
-  | { type: "companion:closed"; meeting_id: number };
+  | { type: "companion:closed"; meeting_id: number }
+  | { type: "agenda:added"; meeting_id: number }
+  | { type: "decision:added"; meeting_id: number }
+  | { type: "action:added"; meeting_id: number };
 
 export function createCompanionChannel(): BroadcastChannel {
   return new BroadcastChannel(CHANNEL_NAME);
