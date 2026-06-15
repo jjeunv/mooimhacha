@@ -16,6 +16,7 @@ interface Props {
 }
 
 export default function QuickInput({ members, onDecision, onAction }: Props) {
+  const [collapsed, setCollapsed] = useState(true);
   const [decision, setDecision] = useState("");
   const [actionDesc, setActionDesc] = useState("");
   const [assignee, setAssignee] = useState<string>("");
@@ -76,54 +77,71 @@ export default function QuickInput({ members, onDecision, onAction }: Props) {
 
   return (
     <section className="cmp-section cmp-quick">
-      <div className="cmp-quick-block">
-        <label>
-          결정 <kbd>⌘D</kbd>
-        </label>
-        <input
-          ref={decisionRef}
-          value={decision}
-          placeholder="결정사항 한 줄 + Enter"
-          onChange={(e) => setDecision(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submitDecision()}
-        />
-      </div>
-      <div className="cmp-quick-block">
-        <label>
-          액션 <kbd>⌘A</kbd>
-        </label>
-        <input
-          ref={actionRef}
-          value={actionDesc}
-          placeholder="할 일 한 줄 + Enter"
-          onChange={(e) => setActionDesc(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submitAction()}
-        />
-        <div className="cmp-quick-action-meta">
-          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">담당자</option>
-            {members.map((m) => (
-              <option key={m.user_id} value={m.user_id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-          />
-          <label className="cmp-quick-next" title="다음 회의 전까지">
+      <header
+        className="cmp-section__head cmp-section__head--toggle"
+        onClick={() => setCollapsed((c) => !c)}
+        title={collapsed ? "펼치기" : "접기"}
+      >
+        <h2>결정 · 액션</h2>
+        <span className="cmp-toggle-btn">
+          <i className={`ti ti-chevron-${collapsed ? "down" : "up"}`} />
+        </span>
+      </header>
+      {!collapsed && (
+        <>
+          <div className="cmp-quick-block">
+            <label>
+              결정 <kbd>⌘D</kbd>
+            </label>
             <input
-              type="checkbox"
-              checked={forNext}
-              onChange={(e) => setForNext(e.target.checked)}
+              ref={decisionRef}
+              value={decision}
+              placeholder="결정사항 한 줄 + Enter"
+              onChange={(e) => setDecision(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitDecision()}
             />
-            다음 회의 전
-          </label>
-          <button onClick={submitAction}>추가</button>
-        </div>
-      </div>
+          </div>
+          <div className="cmp-quick-block">
+            <label>
+              액션 <kbd>⌘A</kbd>
+            </label>
+            <input
+              ref={actionRef}
+              value={actionDesc}
+              placeholder="할 일 한 줄 + Enter"
+              onChange={(e) => setActionDesc(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitAction()}
+            />
+            <div className="cmp-quick-action-meta">
+              <select
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+              >
+                <option value="">담당자</option>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+              />
+              <label className="cmp-quick-next" title="다음 회의 전까지">
+                <input
+                  type="checkbox"
+                  checked={forNext}
+                  onChange={(e) => setForNext(e.target.checked)}
+                />
+                다음 회의 전
+              </label>
+              <button onClick={submitAction}>추가</button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

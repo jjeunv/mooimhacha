@@ -19,6 +19,7 @@ import { createSttEngine, type SttEngine } from "@/lib/stt-engine";
 import { createCompanionChannel } from "@/lib/companion";
 import type {
   Agenda,
+  CurrentUser,
   Decision,
   ActionItem,
   Meeting,
@@ -68,6 +69,9 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
   const [connLost, setConnLost] = useState(false);
   const [ending, setEnding] = useState(false);
   const [speakingSelf, setSpeakingSelf] = useState(false);
+  const [partialText, setPartialText] = useState("");
+  const [myUserId, setMyUserId] = useState<number | null>(null);
+  const [recentCollapsed, setRecentCollapsed] = useState(true);
 
   const socketRef = useRef<Socket | null>(null);
   const engineRef = useRef<SttEngine | null>(null);
@@ -81,7 +85,12 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
   const lastSpokeRef = useRef<number>(Date.now());
   // t0 미수신 상태에서 확정된 발화는 절대시각으로 버퍼링했다가 t0 도착 시 flush
   const pendingRef = useRef<
-    { text: string; confidence: number | null; startAbs: number; endAbs: number }[]
+    {
+      text: string;
+      confidence: number | null;
+      startAbs: number;
+      endAbs: number;
+    }[]
   >([]);
 
   // 매초 갱신 (시간 초과 시각화용)
@@ -192,12 +201,13 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
 
     void (async () => {
       try {
-        const [m, ag, team, dec, act] = await Promise.all([
+        const [m, ag, team, dec, act, me] = await Promise.all([
           apiGet<Meeting>(`/meetings/${meetingId}`),
           apiGet<Agenda[]>(`/meetings/${meetingId}/agendas`),
           apiGet<{ members: TeamMember[] }>(`/teams/${teamId}`),
           apiGet<Decision[]>(`/decisions?meeting_id=${meetingId}`),
           apiGet<ActionItem[]>(`/action-items?team_id=${teamId}`),
+          apiGet<CurrentUser>("/auth/me"),
         ]);
         if (!mounted) return;
         setMeeting(m);
@@ -205,6 +215,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         setMembers(team.members);
         setDecisions(dec);
         setActions(act);
+        setMyUserId(me.id);
         if (m.t0_timestamp) {
           const t = new Date(m.t0_timestamp).getTime();
           setT0ms(t);
@@ -351,6 +362,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
       const s = socketRef.current;
       if (s) speakingEnd(s, meetingId);
       setSpeakingSelf(false);
+      setPartialText("");
       setMicOn(false);
       return;
     }
@@ -396,7 +408,9 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         const s = socketRef.current;
         if (s) speakingEnd(s, meetingId);
       },
+      onPartial: (text) => setPartialText(text),
       onFinal: (text, confidence) => {
+        setPartialText("");
         setSttIssue(null);
         sendUtteranceNow(text, confidence);
       },
@@ -443,13 +457,32 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
   const handleActivate = (id: number) => {
     const s = socketRef.current;
     if (!s) return;
-    changeAgendaStatus(s, {
-      meeting_id: meetingId,
-      agenda_id: id,
-      activate: true,
-    }).catch(() => {
-      setWsIssue("안건 상태 변경이 확인되지 않았어요. 잠시 후 다시 시도해 주세요.");
-    });
+    const active = agendas.find((a) => a.status === "active");
+    const doActivate = () =>
+      changeAgendaStatus(s, {
+        meeting_id: meetingId,
+        agenda_id: id,
+        activate: true,
+      }).catch(() => {
+        setWsIssue(
+          "안건 상태 변경이 확인되지 않았어요. 잠시 후 다시 시도해 주세요.",
+        );
+      });
+    if (active && Number(active.id) !== Number(id)) {
+      changeAgendaStatus(s, {
+        meeting_id: meetingId,
+        agenda_id: Number(active.id),
+        status: "done",
+      })
+        .then(doActivate)
+        .catch(() => {
+          setWsIssue(
+            "안건 상태 변경이 확인되지 않았어요. 잠시 후 다시 시도해 주세요.",
+          );
+        });
+    } else {
+      doActivate();
+    }
   };
   // 완료 = 자동 스위칭: 완료 ack 후 목록 순서상 첫 대기 안건을 이어서 시작한다.
   // activate 한 번으로 합치지 않는 이유 — 서버 activate 의 기존 안건 자동 완료는
@@ -475,9 +508,19 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         });
       })
       .catch(() => {
-        setWsIssue("안건 상태 변경이 확인되지 않았어요. 잠시 후 다시 시도해 주세요.");
+        setWsIssue(
+          "안건 상태 변경이 확인되지 않았어요. 잠시 후 다시 시도해 주세요.",
+        );
       });
   };
+  const broadcast = (
+    type: "agenda:added" | "decision:added" | "action:added",
+  ) => {
+    const ch = createCompanionChannel();
+    ch.postMessage({ type, meeting_id: meetingId });
+    ch.close();
+  };
+
   const handleAddAgenda = async (title: string) => {
     try {
       const created = await apiPost<Agenda>(`/meetings/${meetingId}/agendas`, {
@@ -485,6 +528,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         source: "ad_hoc",
       });
       setAgendas((prev) => [...prev, created]);
+      broadcast("agenda:added");
     } catch {
       // 회의 중 사소한 쓰기 실패 — 풀스크린 에러 대신 인라인 배너로 회의 화면 보존
       setWsIssue("안건을 추가하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -497,10 +541,13 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
     if (!s) return false;
     try {
       await addDecision(s, { meeting_id: meetingId, content });
+      broadcast("decision:added");
       return true;
     } catch {
       lateArrivalRef.current = { kind: "decision", text: content };
-      setWsIssue("결정사항 저장이 확인되지 않았어요. 입력을 복원했어요 — 다시 시도해 주세요.");
+      setWsIssue(
+        "결정사항 저장이 확인되지 않았어요. 입력을 복원했어요 — 다시 시도해 주세요.",
+      );
       return false;
     }
   };
@@ -513,11 +560,18 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
     const s = socketRef.current;
     if (!s) return false;
     try {
-      await addAction(s, { meeting_id: meetingId, team_id: teamId, ...payload });
+      await addAction(s, {
+        meeting_id: meetingId,
+        team_id: teamId,
+        ...payload,
+      });
+      broadcast("action:added");
       return true;
     } catch {
       lateArrivalRef.current = { kind: "action", text: payload.description };
-      setWsIssue("액션 저장이 확인되지 않았어요. 입력을 복원했어요 — 다시 시도해 주세요.");
+      setWsIssue(
+        "액션 저장이 확인되지 않았어요. 입력을 복원했어요 — 다시 시도해 주세요.",
+      );
       return false;
     }
   };
@@ -525,7 +579,9 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
   const handleEnd = async () => {
     if (ending) return;
     if (
-      !confirm("회의를 종료하면 다시 시작할 수 없어요. 지금 기여도를 확정할까요?")
+      !confirm(
+        "회의를 종료하면 다시 시작할 수 없어요. 지금 기여도를 확정할까요?",
+      )
     )
       return;
     setEnding(true);
@@ -560,8 +616,17 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
     );
   }
 
-  const elapsedMin =
-    t0ms !== null ? Math.floor((now - t0ms) / 60000) : 0;
+  const elapsedSec =
+    t0ms !== null ? Math.max(0, Math.floor((now - t0ms) / 1000)) : 0;
+  const fmtHms = (sec: number) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const mm = String(m).padStart(2, "0");
+    const ss = String(s).padStart(2, "0");
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  };
+  const totalSec = (meeting?.total_minutes ?? 0) * 60;
   const recentDecisions = decisions.slice(-3).reverse();
   const recentActions = actions.slice(-3).reverse();
 
@@ -571,7 +636,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         <div className="cmp-header__title">
           <strong>{meeting?.topic ?? "회의 진행 중"}</strong>
           <span className="cmp-header__time">
-            {elapsedMin}분 / {meeting?.total_minutes ?? 0}분
+            {fmtHms(elapsedSec)} / {fmtHms(totalSec)}
           </span>
         </div>
         <div className="cmp-header__actions">
@@ -583,11 +648,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
           >
             {micOn ? "🔴 듣는 중" : "🎙 마이크 켜기"}
           </button>
-          <button
-            className="cmp-end-btn"
-            onClick={handleEnd}
-            disabled={ending}
-          >
+          <button className="cmp-end-btn" onClick={handleEnd} disabled={ending}>
             {ending ? "종료 중…" : "회의 종료"}
           </button>
         </div>
@@ -640,6 +701,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
             : "🎙 마이크 켜짐 · 발언을 기다리는 중"}
         </div>
       )}
+      {partialText && <div className="cmp-partial-text">{partialText}</div>}
       {silentHint && (
         <div className="cmp-silent-hint">
           🔇 한동안 발언이 없어요. 의견을 나눠보세요.
@@ -656,7 +718,12 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         onAdd={handleAddAgenda}
       />
 
-      <ContributionBar scores={scores} members={members} speaking={speaking} />
+      <ContributionBar
+        scores={scores}
+        members={members}
+        speaking={speaking}
+        myUserId={myUserId}
+      />
 
       <QuickInput
         members={members}
@@ -665,26 +732,35 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
       />
 
       <section className="cmp-section cmp-recent">
-        <header className="cmp-section__head">
+        <header
+          className="cmp-section__head cmp-section__head--toggle"
+          onClick={() => setRecentCollapsed((c) => !c)}
+          title={recentCollapsed ? "펼치기" : "접기"}
+        >
           <h2>최근 항목</h2>
+          <span className="cmp-toggle-btn">
+            <i className={`ti ti-chevron-${recentCollapsed ? "down" : "up"}`} />
+          </span>
         </header>
-        <ul className="cmp-recent-list">
-          {recentDecisions.map((d) => (
-            <li key={`d${d.id}`}>
-              <span className="cmp-tag cmp-tag--decision">결정</span>
-              {d.content}
-            </li>
-          ))}
-          {recentActions.map((a) => (
-            <li key={`a${a.id}`}>
-              <span className="cmp-tag cmp-tag--action">액션</span>
-              {a.description}
-            </li>
-          ))}
-          {recentDecisions.length === 0 && recentActions.length === 0 && (
-            <li className="cmp-empty">기록된 항목이 없습니다.</li>
-          )}
-        </ul>
+        {!recentCollapsed && (
+          <ul className="cmp-recent-list">
+            {recentDecisions.map((d) => (
+              <li key={`d${d.id}`}>
+                <span className="cmp-tag cmp-tag--decision">결정</span>
+                {d.content}
+              </li>
+            ))}
+            {recentActions.map((a) => (
+              <li key={`a${a.id}`}>
+                <span className="cmp-tag cmp-tag--action">액션</span>
+                {a.description}
+              </li>
+            ))}
+            {recentDecisions.length === 0 && recentActions.length === 0 && (
+              <li className="cmp-empty">기록된 항목이 없습니다.</li>
+            )}
+          </ul>
+        )}
       </section>
     </div>
   );

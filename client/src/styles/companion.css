@@ -7,18 +7,22 @@
 html,
 body {
   margin: 0;
+  width: 100%;
   height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
+}
+#companion-root {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
 .companion {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* 보조 창은 window.open 이 폭을 정하는 전용 창이라 내부에서 다시 가두지 않는다.
-     400px 캡 + margin auto 를 두면 창 내부 폭이 400px보다 넓을 때 우측 여백이 생긴다. */
   width: 100%;
   overflow: hidden;
 }
@@ -27,10 +31,12 @@ body {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   overflow-y: auto;
+  min-height: 0;
 }
 .cmp-section__head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 6px;
 }
 .cmp-section__head h2 {
@@ -40,6 +46,26 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin: 0;
+}
+.cmp-section__head--toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.cmp-section__head--toggle:hover {
+  opacity: 0.8;
+}
+.cmp-toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-soft);
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
 }
 
 /* 헤더 */
@@ -89,9 +115,9 @@ body {
   color: var(--coral);
 }
 
-/* 안건 추적 (40%) */
+/* 안건 추적 — 남은 공간 전부 차지 */
 .cmp-agenda {
-  flex: 0 0 38%;
+  flex: 1 1 0;
 }
 .cmp-agenda-list {
   list-style: none;
@@ -244,9 +270,11 @@ body {
   cursor: pointer;
 }
 
-/* 기여도 바 (30%) */
+/* 기여도 바 */
 .cmp-contrib {
   flex: 0 0 auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 .cmp-info {
   margin-left: 4px;
@@ -256,78 +284,79 @@ body {
 .cmp-bars {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
+  width: 100%;
 }
-.cmp-bar-label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 3px;
-}
-.cmp-bar-name {
+.cmp-bar-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-weight: 600;
+  gap: 6px;
+  width: 100%;
 }
-.cmp-bar-count {
-  color: var(--text-soft);
+.cmp-bar-name {
+  flex: 0 0 64px;
+  width: 64px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 .cmp-bar-track {
-  position: relative;
-  height: 16px;
+  flex: 1;
+  height: 10px;
   background: var(--track);
-  border-radius: 8px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .cmp-bar-fill {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 5px;
 }
-.cmp-bar-pct {
-  position: absolute;
-  right: 6px;
-  top: 0;
-  line-height: 16px;
+.cmp-bar-count {
+  flex: 0 0 auto;
   font-size: 10px;
-  color: var(--text);
-  font-weight: 700;
+  color: var(--text-soft);
+  white-space: nowrap;
 }
 
 /* 빠른 입력 (20%) */
 .cmp-quick {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 .cmp-quick-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .cmp-quick-block label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-mut);
   font-weight: 700;
 }
 .cmp-quick-block kbd {
   background: var(--surface-3);
-  border-radius: 4px;
-  padding: 0 4px;
-  font-size: 10px;
-  margin-left: 4px;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 9px;
+  margin-left: 3px;
 }
 .cmp-quick input,
 .cmp-quick select {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
   background: var(--surface);
 }
 .cmp-quick-action-meta {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 .cmp-quick-action-meta select,
 .cmp-quick-action-meta input {
@@ -338,10 +367,10 @@ body {
   border: 1px solid var(--green);
   background: var(--green-soft);
   color: var(--green-deep);
-  border-radius: 8px;
-  padding: 0 10px;
+  border-radius: 6px;
+  padding: 0 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
 }
 .cmp-quick-next {
   display: flex;
@@ -385,6 +414,17 @@ body {
   border-radius: 8px;
   font-size: 12px;
   text-align: center;
+}
+/* 실시간 발화 미리보기 */
+.cmp-partial-text {
+  margin: 6px 10px 0;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  border-radius: 8px;
+  font-size: 13px;
+  font-style: italic;
+  border-left: 3px solid var(--green);
 }
 /* 연결 끊김 / 마이크 오류 (경고색) */
 .cmp-conn-banner,

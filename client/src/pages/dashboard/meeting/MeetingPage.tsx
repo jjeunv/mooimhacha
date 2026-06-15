@@ -6,7 +6,7 @@ import Modal from "@/components/Modal";
 import ConfirmModal from "@/components/ConfirmModal";
 import HeadsetGateModal from "@/components/HeadsetGateModal";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
-import { openCompanion } from "@/lib/companion";
+import { openCompanion, createCompanionChannel } from "@/lib/companion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type {
   Agenda,
@@ -52,14 +52,15 @@ function meetingMeta(m: Meeting, memberCount: number): string {
     minute: "2-digit",
   });
   if (m.status === "ended" && m.t0_timestamp && m.ended_at) {
-    const mins = Math.max(
-      1,
-      Math.round(
-        (new Date(m.ended_at).getTime() - new Date(m.t0_timestamp).getTime()) /
-          60000,
-      ),
-    );
-    return `${day} · ${mins}분`;
+    const start = new Date(m.t0_timestamp);
+    const end = new Date(m.ended_at);
+    const fmt = (d: Date) =>
+      `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+    const sameDay = start.toDateString() === end.toDateString();
+    const endStr = sameDay
+      ? end.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+      : fmt(end);
+    return `${fmt(start)} ~ ${endStr}`;
   }
   return `${day} ${time} · ${memberCount}명`;
 }
@@ -155,6 +156,26 @@ export default function MeetingPage() {
   useEffect(() => {
     void loadMeetings();
   }, [loadMeetings]);
+
+  // companion 창 이벤트 → 대시보드 즉시 갱신
+  useEffect(() => {
+    const ch = createCompanionChannel();
+    ch.onmessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string };
+      if (msg.type === "meeting:ended") {
+        void loadMeetings();
+      } else if (msg.type === "agenda:added" && selectedId) {
+        void apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`)
+          .then(setAgendas)
+          .catch(() => {});
+      } else if (msg.type === "decision:added" && selectedId) {
+        void apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`)
+          .then(setDecisions)
+          .catch(() => {});
+      }
+    };
+    return () => ch.close();
+  }, [loadMeetings, selectedId]);
 
   // 회의 목록 출결 요약 — 카드 배지·미처리 표시용 (부가 정보라 실패는 조용히 무시)
   const loadSummaries = useCallback(async () => {
@@ -567,11 +588,11 @@ export default function MeetingPage() {
         label: "완료",
         items: [...meetings]
           .filter((m) => m.status === "ended")
-          .sort(
-            (a, b) =>
-              new Date(b.scheduled_at).getTime() -
-              new Date(a.scheduled_at).getTime(),
-          ),
+          .sort((a, b) => {
+            const ta = a.ended_at ?? a.scheduled_at;
+            const tb = b.ended_at ?? b.scheduled_at;
+            return new Date(tb).getTime() - new Date(ta).getTime();
+          }),
       },
     ],
     [meetings],
@@ -703,6 +724,14 @@ export default function MeetingPage() {
                   {selected.status === "active" && (
                     <span style={{ color: "var(--coral)", fontWeight: 700 }}>
                       <i className="ti ti-clock" /> {fmt(elapsed)}
+                    </span>
+                  )}
+                  {selected.status === "active" && (
+                    <span
+                      className="mdh-companion-link"
+                      onClick={() => openCompanion(selected.id, team!.id)}
+                    >
+                      <i className="ti ti-external-link" /> 회의 창 열기
                     </span>
                   )}
                 </div>
@@ -933,11 +962,23 @@ export default function MeetingPage() {
                                           {speaker?.name ??
                                             `사용자 ${g.user_id}`}
                                           <span className="utt-time">
-                                            {fmt(
-                                              Math.floor(
-                                                g.started_at_offset_ms / 1000,
-                                              ),
-                                            )}
+                                            {selected.t0_timestamp
+                                              ? new Date(
+                                                  new Date(
+                                                    selected.t0_timestamp,
+                                                  ).getTime() +
+                                                    g.started_at_offset_ms,
+                                                ).toLocaleTimeString("ko-KR", {
+                                                  hour: "2-digit",
+                                                  minute: "2-digit",
+                                                  second: "2-digit",
+                                                })
+                                              : fmt(
+                                                  Math.floor(
+                                                    g.started_at_offset_ms /
+                                                      1000,
+                                                  ),
+                                                )}
                                           </span>
                                         </span>
                                         <span className="utt-text">
