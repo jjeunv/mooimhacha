@@ -2,6 +2,8 @@ import { io, Socket } from "socket.io-client";
 import { API_BASE, getAccessToken, tryRefresh } from "./api";
 import type { ActionItem, Agenda, Decision } from "./types";
 
+const WS_BASE = (import.meta.env.VITE_WS_URL as string | undefined) || API_BASE;
+
 // 회의 룸 WebSocket(socket.io) 래퍼. 서버 RealtimeGateway 와 짝.
 // 이벤트 명세: docs/04-API-명세.md §WebSocket 이벤트
 
@@ -31,7 +33,7 @@ function getTokenExpMs(token: string): number | null {
 }
 
 export function connectMeetingSocket(): Socket {
-  const socket = io(API_BASE, {
+  const socket = io(WS_BASE, {
     transports: ["websocket"],
     // 함수형 auth — 재연결 시점의 최신 토큰 사용 (정적 객체는 생성 시점 토큰에 고착됨).
     // cb 호출 전까지 CONNECT 패킷이 보류되므로, 만료 임박이면 tryRefresh 를 먼저 끝낸다.
