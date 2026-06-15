@@ -19,6 +19,7 @@ import { createSttEngine, type SttEngine } from "@/lib/stt-engine";
 import { createCompanionChannel } from "@/lib/companion";
 import type {
   Agenda,
+  CurrentUser,
   Decision,
   ActionItem,
   Meeting,
@@ -69,6 +70,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
   const [ending, setEnding] = useState(false);
   const [speakingSelf, setSpeakingSelf] = useState(false);
   const [partialText, setPartialText] = useState("");
+  const [myUserId, setMyUserId] = useState<number | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const engineRef = useRef<SttEngine | null>(null);
@@ -198,12 +200,13 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
 
     void (async () => {
       try {
-        const [m, ag, team, dec, act] = await Promise.all([
+        const [m, ag, team, dec, act, me] = await Promise.all([
           apiGet<Meeting>(`/meetings/${meetingId}`),
           apiGet<Agenda[]>(`/meetings/${meetingId}/agendas`),
           apiGet<{ members: TeamMember[] }>(`/teams/${teamId}`),
           apiGet<Decision[]>(`/decisions?meeting_id=${meetingId}`),
           apiGet<ActionItem[]>(`/action-items?team_id=${teamId}`),
+          apiGet<CurrentUser>("/auth/me"),
         ]);
         if (!mounted) return;
         setMeeting(m);
@@ -211,6 +214,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         setMembers(team.members);
         setDecisions(dec);
         setActions(act);
+        setMyUserId(me.id);
         if (m.t0_timestamp) {
           const t = new Date(m.t0_timestamp).getTime();
           setT0ms(t);
@@ -600,7 +604,17 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
     );
   }
 
-  const elapsedMin = t0ms !== null ? Math.floor((now - t0ms) / 60000) : 0;
+  const elapsedSec =
+    t0ms !== null ? Math.max(0, Math.floor((now - t0ms) / 1000)) : 0;
+  const fmtHms = (sec: number) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const mm = String(m).padStart(2, "0");
+    const ss = String(s).padStart(2, "0");
+    return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  };
+  const totalSec = (meeting?.total_minutes ?? 0) * 60;
   const recentDecisions = decisions.slice(-3).reverse();
   const recentActions = actions.slice(-3).reverse();
 
@@ -610,7 +624,7 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         <div className="cmp-header__title">
           <strong>{meeting?.topic ?? "회의 진행 중"}</strong>
           <span className="cmp-header__time">
-            {elapsedMin}분 / {meeting?.total_minutes ?? 0}분
+            {fmtHms(elapsedSec)} / {fmtHms(totalSec)}
           </span>
         </div>
         <div className="cmp-header__actions">
@@ -692,7 +706,12 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         onAdd={handleAddAgenda}
       />
 
-      <ContributionBar scores={scores} members={members} speaking={speaking} />
+      <ContributionBar
+        scores={scores}
+        members={members}
+        speaking={speaking}
+        myUserId={myUserId}
+      />
 
       <QuickInput
         members={members}

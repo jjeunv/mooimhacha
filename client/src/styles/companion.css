@@ -17,9 +17,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  /* 보조 창은 window.open 이 폭을 정하는 전용 창이라 내부에서 다시 가두지 않는다.
-     400px 캡 + margin auto 를 두면 창 내부 폭이 400px보다 넓을 때 우측 여백이 생긴다. */
   width: 100%;
+  min-width: 320px;
   overflow: hidden;
 }
 
@@ -27,6 +26,7 @@ body {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   overflow-y: auto;
+  min-height: 0;
 }
 .cmp-section__head {
   display: flex;
@@ -89,9 +89,9 @@ body {
   color: var(--coral);
 }
 
-/* 안건 추적 (40%) */
+/* 안건 추적 — 남은 공간 전부 차지 */
 .cmp-agenda {
-  flex: 0 0 38%;
+  flex: 1 1 0;
 }
 .cmp-agenda-list {
   list-style: none;
@@ -244,9 +244,11 @@ body {
   cursor: pointer;
 }
 
-/* 기여도 바 (30%) */
+/* 기여도 바 */
 .cmp-contrib {
   flex: 0 0 auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 .cmp-info {
   margin-left: 4px;
@@ -256,13 +258,13 @@ body {
 .cmp-bars {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 .cmp-bar-label {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 3px;
+  font-size: 11px;
+  margin-bottom: 2px;
 }
 .cmp-bar-name {
   display: flex;
@@ -275,21 +277,21 @@ body {
 }
 .cmp-bar-track {
   position: relative;
-  height: 16px;
+  height: 10px;
   background: var(--track);
-  border-radius: 8px;
+  border-radius: 5px;
   overflow: hidden;
 }
 .cmp-bar-fill {
   height: 100%;
-  border-radius: 8px;
+  border-radius: 5px;
 }
 .cmp-bar-pct {
   position: absolute;
-  right: 6px;
+  right: 5px;
   top: 0;
-  line-height: 16px;
-  font-size: 10px;
+  line-height: 10px;
+  font-size: 9px;
   color: var(--text);
   font-weight: 700;
 }
