@@ -275,24 +275,28 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  width: 100%;
 }
-.cmp-bar-label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  margin-bottom: 2px;
-}
-.cmp-bar-name {
+.cmp-bar-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-weight: 600;
+  gap: 6px;
+  width: 100%;
 }
-.cmp-bar-count {
-  color: var(--text-soft);
+.cmp-bar-name {
+  flex: 0 0 64px;
+  width: 64px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 .cmp-bar-track {
-  position: relative;
+  flex: 1;
   height: 10px;
   background: var(--track);
   border-radius: 5px;
@@ -302,50 +306,47 @@ body {
   height: 100%;
   border-radius: 5px;
 }
-.cmp-bar-pct {
-  position: absolute;
-  right: 5px;
-  top: 0;
-  line-height: 10px;
-  font-size: 9px;
-  color: var(--text);
-  font-weight: 700;
+.cmp-bar-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-soft);
+  white-space: nowrap;
 }
 
 /* 빠른 입력 (20%) */
 .cmp-quick {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 .cmp-quick-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .cmp-quick-block label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-mut);
   font-weight: 700;
 }
 .cmp-quick-block kbd {
   background: var(--surface-3);
-  border-radius: 4px;
-  padding: 0 4px;
-  font-size: 10px;
-  margin-left: 4px;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 9px;
+  margin-left: 3px;
 }
 .cmp-quick input,
 .cmp-quick select {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
   background: var(--surface);
 }
 .cmp-quick-action-meta {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 .cmp-quick-action-meta select,
 .cmp-quick-action-meta input {
@@ -356,10 +357,10 @@ body {
   border: 1px solid var(--green);
   background: var(--green-soft);
   color: var(--green-deep);
-  border-radius: 8px;
-  padding: 0 10px;
+  border-radius: 6px;
+  padding: 0 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
 }
 .cmp-quick-next {
   display: flex;

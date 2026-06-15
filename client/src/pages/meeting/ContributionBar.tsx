@@ -71,15 +71,12 @@ export default function ContributionBar({
           const globalIdx = allRows.findIndex((r) => r.user_id === row.user_id);
           return (
             <div className="cmp-bar-row" key={row.user_id}>
-              <div className="cmp-bar-label">
-                <span className="cmp-bar-name">
-                  {speaking.has(row.user_id) && (
-                    <span className="cmp-mic">🎤</span>
-                  )}
-                  {nameOf(row.user_id)}
-                </span>
-                <span className="cmp-bar-count">{row.char_count}자</span>
-              </div>
+              <span className="cmp-bar-name">
+                {speaking.has(row.user_id) && (
+                  <span className="cmp-mic">🎤</span>
+                )}
+                {nameOf(row.user_id)}
+              </span>
               <div className="cmp-bar-track">
                 <motion.div
                   className="cmp-bar-fill"
@@ -90,10 +87,8 @@ export default function ContributionBar({
                   animate={{ width: `${Math.round(row.ratio * 100)}%` }}
                   transition={{ type: "spring", stiffness: 120, damping: 20 }}
                 />
-                <span className="cmp-bar-pct">
-                  {Math.round(row.ratio * 100)}%
-                </span>
               </div>
+              <span className="cmp-bar-count">{row.char_count}자</span>
             </div>
           );
         })}
