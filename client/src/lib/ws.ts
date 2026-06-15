@@ -1,8 +1,8 @@
 import { io, Socket } from "socket.io-client";
 import { API_BASE, getAccessToken, tryRefresh } from "./api";
+import type { ActionItem, Agenda, Decision } from "./types";
 
 const WS_BASE = (import.meta.env.VITE_WS_URL as string | undefined) || API_BASE;
-import type { ActionItem, Agenda, Decision } from "./types";
 
 // 회의 룸 WebSocket(socket.io) 래퍼. 서버 RealtimeGateway 와 짝.
 // 이벤트 명세: docs/04-API-명세.md §WebSocket 이벤트
