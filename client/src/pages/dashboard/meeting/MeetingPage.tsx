@@ -9,10 +9,12 @@ import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { openCompanion, createCompanionChannel } from "@/lib/companion";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type {
+  ActionItem,
   Agenda,
   Decision,
   Meeting,
   MeetingContribution,
+  TeamContribution,
   MeetingAttendance,
   AttendanceSummary,
   AttendanceStatus,
@@ -22,6 +24,23 @@ import type {
 import type { TeamContext } from "../DashboardPage";
 
 type Tab = "agenda" | "speak" | "attendance" | "decision" | "summary";
+type Status = "할 일" | "진행 중" | "완료";
+
+const STATUS_TO_API: Record<Status, string> = {
+  "할 일": "todo",
+  "진행 중": "in_progress",
+  완료: "done",
+};
+const DIFF_CHIPS = [
+  { value: 1, label: "★ 낮음" },
+  { value: 2, label: "★★ 보통" },
+  { value: 3, label: "★★★ 높음" },
+] as const;
+const STATUS_CHIP_CLS: Record<Status, string> = {
+  "할 일": "chip-todo",
+  "진행 중": "chip-inprog",
+  완료: "chip-done",
+};
 
 // 출결 상태별 배지 표기 (기존 색상 토큰 재사용)
 const ATT_BADGE: Record<
@@ -97,6 +116,18 @@ export default function MeetingPage() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [pendingTasks, setPendingTasks] = useState<ActionItem[]>([]);
+  const [members, setMembers] = useState<TeamContribution[]>([]);
+
+  // AI 태스크 확정 모달
+  const [confirmTask, setConfirmTask] = useState<ActionItem | null>(null);
+  const [confirmDesc, setConfirmDesc] = useState("");
+  const [confirmAssignee, setConfirmAssignee] = useState("");
+  const [confirmDue, setConfirmDue] = useState("");
+  const [confirmTime, setConfirmTime] = useState("");
+  const [confirmStatus, setConfirmStatus] = useState<Status>("할 일");
+  const [confirmDifficulty, setConfirmDifficulty] = useState(2);
+  const [confirmSaving, setConfirmSaving] = useState(false);
   // 발언 탭 최초 진입 시 바 애니메이션을 한 번만 실행하기 위한 플래그.
   // state 대신 ref를 쓰는 이유: 값 변경이 리렌더를 유발할 필요 없음.
   const barsAnimated = useRef(false);
@@ -156,6 +187,33 @@ export default function MeetingPage() {
   useEffect(() => {
     void loadMeetings();
   }, [loadMeetings]);
+
+  const loadPendingTasks = useCallback(async () => {
+    if (!team || !selectedId) return;
+    try {
+      const all = await apiGet<ActionItem[]>(
+        `/action-items?team_id=${team.id}&meeting_id=${selectedId}&confirmed=false`,
+      );
+      setPendingTasks(all.filter((t) => t.source === "ai_extracted"));
+    } catch {
+      // 실패는 무시 — 요약 탭 부가 기능
+    }
+  }, [team, selectedId]);
+
+  // 요약 탭 + 종료된 회의일 때 미확정 AI 태스크 로드
+  useEffect(() => {
+    if (tab === "summary" && selected?.status === "ended") {
+      void loadPendingTasks();
+    }
+  }, [tab, selected?.status, loadPendingTasks]);
+
+  // 팀 멤버 목록 (확정 모달 담당자 선택용)
+  useEffect(() => {
+    if (!team) return;
+    apiGet<{ members: TeamContribution[] }>(`/teams/${team.id}/contributions`)
+      .then((r) => setMembers(r.members))
+      .catch(() => {});
+  }, [team]);
 
   // companion 창 이벤트 → 대시보드 즉시 갱신
   useEffect(() => {
@@ -305,6 +363,34 @@ export default function MeetingPage() {
     }
     return `${ag.actual_minutes ?? ag.estimated_minutes}분`;
   };
+
+  async function saveConfirmTask() {
+    if (!confirmTask || confirmSaving) return;
+    if (!confirmDesc.trim()) {
+      showToast("태스크 이름을 입력해 주세요", "error");
+      return;
+    }
+    setConfirmSaving(true);
+    try {
+      await apiPatch(`/action-items/${confirmTask.id}`, {
+        description: confirmDesc.trim(),
+        confirmed: true,
+        assignee_id: confirmAssignee ? Number(confirmAssignee) : null,
+        due_date: confirmDue
+          ? new Date(`${confirmDue}T${confirmTime || "23:59"}`).toISOString()
+          : undefined,
+        status: STATUS_TO_API[confirmStatus],
+        difficulty: confirmDifficulty,
+      });
+      setPendingTasks((prev) => prev.filter((t) => t.id !== confirmTask.id));
+      setConfirmTask(null);
+      showToast("태스크가 확정됐습니다.");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setConfirmSaving(false);
+    }
+  }
 
   // 추가/수정 겸용 — editingDecision이 있으면 PATCH, 없으면 POST
   async function saveDecision() {
@@ -1213,64 +1299,164 @@ export default function MeetingPage() {
                         결정사항·액션아이템·회의록을 요약합니다.
                       </div>
                     ) : (
-                      <div className="summary-section">
-                        <div className="summary-header">
-                          <div className="summary-title">
-                            <i className="ti ti-sparkles" />
-                            AI 회의록
-                          </div>
-                          <button
-                            className="btn btn-sm"
-                            disabled={busy}
-                            onClick={async () => {
-                              setBusy(true);
-                              try {
-                                const res = await apiPost<{
-                                  summarized: boolean;
-                                  reason?: string;
-                                }>(`/meetings/${selectedId}/summarize`);
-                                if (!res.summarized) {
-                                  showToast(
-                                    res.reason === "llm_not_configured"
-                                      ? "API 키가 설정되지 않았습니다."
-                                      : "요약에 실패했어요. 다시 시도해 주세요.",
-                                    "error",
-                                  );
-                                } else {
-                                  await loadMeetings();
-                                  showToast("회의가 요약됐습니다.");
+                      <>
+                        <div className="summary-section">
+                          <div className="summary-header">
+                            <div className="summary-title">
+                              <i className="ti ti-sparkles" />
+                              AI 회의록
+                            </div>
+                            <button
+                              className="btn btn-sm"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  const res = await apiPost<{
+                                    summarized: boolean;
+                                    reason?: string;
+                                  }>(`/meetings/${selectedId}/summarize`);
+                                  if (!res.summarized) {
+                                    showToast(
+                                      res.reason === "llm_not_configured"
+                                        ? "API 키가 설정되지 않았습니다."
+                                        : "요약에 실패했어요. 다시 시도해 주세요.",
+                                      "error",
+                                    );
+                                  } else {
+                                    await loadMeetings();
+                                    await loadPendingTasks();
+                                    showToast("회의가 요약됐습니다.");
+                                  }
+                                } catch (e) {
+                                  showToast((e as Error).message, "error");
+                                } finally {
+                                  setBusy(false);
                                 }
-                              } catch (e) {
-                                showToast((e as Error).message, "error");
-                              } finally {
-                                setBusy(false);
-                              }
-                            }}
-                          >
-                            <i
-                              className={`ti ${busy ? "ti-loader-2" : "ti-refresh"}`}
-                            />
-                            {busy
-                              ? "요약 중…"
-                              : selected.summary
-                                ? "다시 요약"
-                                : "요약 생성"}
-                          </button>
-                        </div>
-                        {selected.summary ? (
-                          <div className="summary-md">
-                            <ReactMarkdown>{selected.summary}</ReactMarkdown>
+                              }}
+                            >
+                              <i
+                                className={`ti ${busy ? "ti-loader-2" : "ti-refresh"}`}
+                              />
+                              {busy
+                                ? "요약 중…"
+                                : selected.summary
+                                  ? "다시 요약"
+                                  : "요약 생성"}
+                            </button>
                           </div>
-                        ) : (
-                          <div className="summary-empty">
-                            <i className="ti ti-file-description" />
-                            <span>
-                              발화 기록과 결정 사항을 바탕으로 AI가 회의록을
-                              작성합니다.
-                            </span>
+                          {selected.summary ? (
+                            <div className="summary-md">
+                              <ReactMarkdown>{selected.summary}</ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div className="summary-empty">
+                              <i className="ti ti-file-description" />
+                              <span>
+                                발화 기록과 결정 사항을 바탕으로 AI가 회의록을
+                                작성합니다.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {pendingTasks.length > 0 && (
+                          <div
+                            className="summary-section"
+                            style={{ marginTop: 16 }}
+                          >
+                            <div className="summary-header">
+                              <div className="summary-title">
+                                <i className="ti ti-list-check" />
+                                AI 제안 태스크
+                                <span
+                                  className="badge"
+                                  style={{
+                                    marginLeft: 6,
+                                    background:
+                                      "var(--amber-soft, rgba(240,193,79,.18))",
+                                    color: "var(--amber, #b8860b)",
+                                  }}
+                                >
+                                  {pendingTasks.length}개 검토 대기
+                                </span>
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 8,
+                                padding: "4px 0 8px",
+                              }}
+                            >
+                              {pendingTasks.map((task) => (
+                                <div
+                                  key={task.id}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    padding: "10px 14px",
+                                    background: "var(--surface-2)",
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  <i
+                                    className="ti ti-sparkles"
+                                    style={{
+                                      color: "var(--amber, #b8860b)",
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  <span style={{ flex: 1 }}>
+                                    {task.description}
+                                  </span>
+                                  <button
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => {
+                                      setConfirmTask(task);
+                                      setConfirmDesc(task.description);
+                                      setConfirmAssignee("");
+                                      setConfirmDue("");
+                                      setConfirmTime("");
+                                      setConfirmStatus("할 일");
+                                      setConfirmDifficulty(2);
+                                    }}
+                                  >
+                                    확정
+                                  </button>
+                                  <button
+                                    className="btn btn-sm"
+                                    onClick={async () => {
+                                      setPendingTasks((prev) =>
+                                        prev.filter((t) => t.id !== task.id),
+                                      );
+                                      try {
+                                        await apiDelete(
+                                          `/action-items/${task.id}`,
+                                        );
+                                      } catch (e) {
+                                        setPendingTasks((prev) => [
+                                          ...prev,
+                                          task,
+                                        ]);
+                                        showToast(
+                                          (e as Error).message,
+                                          "error",
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    제거
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -1577,6 +1763,108 @@ export default function MeetingPage() {
           onConfirm={() => void deleteDecision()}
           onClose={() => setDeletingDecision(null)}
         />
+      )}
+
+      {/* AI 태스크 확정 모달 */}
+      {confirmTask && (
+        <Modal
+          title="태스크 확정"
+          onClose={() => setConfirmTask(null)}
+          actions={
+            <>
+              <button className="btn" onClick={() => setConfirmTask(null)}>
+                취소
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void saveConfirmTask()}
+                disabled={confirmSaving}
+              >
+                {confirmSaving ? "확정 중…" : "확정"}
+              </button>
+            </>
+          }
+        >
+          <div className="modal-sub">
+            AI가 제안한 태스크를 검토하고 확정하세요.
+          </div>
+          <div className="field">
+            <label className="field-label">태스크 이름</label>
+            <input
+              className="input"
+              value={confirmDesc}
+              onChange={(e) => setConfirmDesc(e.target.value)}
+            />
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label className="field-label">담당자</label>
+              <select
+                className="input"
+                value={confirmAssignee}
+                onChange={(e) => setConfirmAssignee(e.target.value)}
+              >
+                <option value="">미지정</option>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label className="field-label">마감일</label>
+              <div className="field-row" style={{ gap: 6 }}>
+                <input
+                  className="input"
+                  type="date"
+                  style={{ flex: 2 }}
+                  value={confirmDue}
+                  onChange={(e) => setConfirmDue(e.target.value)}
+                />
+                <input
+                  className="input"
+                  type="time"
+                  style={{ flex: 1 }}
+                  placeholder="23:59"
+                  value={confirmTime}
+                  onChange={(e) => setConfirmTime(e.target.value)}
+                />
+              </div>
+              <div className="field-hint">시간 미입력 시 23:59</div>
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label">상태</label>
+            <div className="chip-row">
+              {(["할 일", "진행 중", "완료"] as Status[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`chip-opt ${STATUS_CHIP_CLS[s]} ${confirmStatus === s ? "active" : ""}`}
+                  onClick={() => setConfirmStatus(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label">난이도</label>
+            <div className="chip-row">
+              {DIFF_CHIPS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  className={`chip-opt chip-diff ${confirmDifficulty === c.value ? "active" : ""}`}
+                  onClick={() => setConfirmDifficulty(c.value)}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* 아젠다 모달 */}

@@ -55,11 +55,14 @@ export interface Decision {
 export interface ActionItem {
   id: number;
   team_id: number;
+  meeting_id: number | null;
   assignee_id: number | null;
   description: string;
   due_date: string | null;
   difficulty: number;
   status: string;
+  source: "manual" | "ai_extracted";
+  confirmed: boolean;
 }
 
 export interface TaskExtension {

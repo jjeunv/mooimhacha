@@ -26,16 +26,28 @@ export class ActionItemsController {
   constructor(private actionItemsService: ActionItemsService) {}
 
   @Get()
-  @ApiOperation({ summary: '액션 목록 (team_id 필수, assignee_id 선택)' })
+  @ApiOperation({
+    summary: '액션 목록 (team_id 필수, assignee_id·meeting_id·confirmed 선택)',
+  })
   list(
     @Request() req: { user: User },
     @Query('team_id', ParseIntPipe) teamId: number,
     @Query('assignee_id') assigneeId?: string,
+    @Query('meeting_id') meetingId?: string,
+    @Query('confirmed') confirmedStr?: string,
   ) {
+    const confirmed =
+      confirmedStr === 'true'
+        ? true
+        : confirmedStr === 'false'
+          ? false
+          : undefined;
     return this.actionItemsService.list(
       req.user.id,
       teamId,
       assigneeId ? Number(assigneeId) : undefined,
+      meetingId ? Number(meetingId) : undefined,
+      confirmed,
     );
   }
 
