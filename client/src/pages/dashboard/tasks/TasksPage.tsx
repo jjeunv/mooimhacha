@@ -166,7 +166,7 @@ export default function TasksPage() {
     if (!team) return;
     try {
       const [ts, cs] = await Promise.all([
-        apiGet<ActionItem[]>(`/action-items?team_id=${team.id}`),
+        apiGet<ActionItem[]>(`/action-items?team_id=${team.id}&confirmed=true`),
         apiGet<{ members: TeamContribution[] }>(
           `/teams/${team.id}/contributions`,
         ),
@@ -777,6 +777,11 @@ export default function TasksPage() {
                             >
                               <i className="ti ti-check" />
                               {fmtCompleted(t.completed_at)} 완료
+                              {t.due_date && new Date(t.completed_at) > new Date(t.due_date) && (
+                                <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--coral)", background: "var(--coral-soft)", borderRadius: 4, padding: "1px 5px" }}>
+                                  기한 초과
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -865,6 +870,11 @@ export default function TasksPage() {
                       >
                         <i className="ti ti-check" style={{ marginRight: 3 }} />
                         {fmtCompleted(t.completed_at)} 완료
+                        {t.due_date && new Date(t.completed_at) > new Date(t.due_date) && (
+                          <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--coral)", background: "var(--coral-soft)", borderRadius: 4, padding: "1px 5px" }}>
+                            기한 초과
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

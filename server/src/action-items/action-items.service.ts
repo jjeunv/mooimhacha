@@ -29,6 +29,7 @@ export class ActionItemsService {
       source_utterance_id: dto.source_utterance_id ?? null,
       status: dto.status ?? 'todo',
       completed_at: dto.status === 'done' ? new Date() : null,
+      confirmed: dto.source === 'ai_extracted' ? false : true,
     });
     return this.actionRepo.save(action);
   }

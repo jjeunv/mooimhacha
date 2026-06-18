@@ -74,7 +74,7 @@ function meetingDateLabel(m: Meeting): string {
     hour: "numeric",
     minute: "2-digit",
   });
-  return sameDay ? `오늘 ${time}` : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  return sameDay ? `오늘 ${time}` : `${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
 }
 
 export default function OverviewPage() {
@@ -232,8 +232,6 @@ export default function OverviewPage() {
               ? `${new Date(derived.nextDue.due_date).getMonth() + 1}/${new Date(derived.nextDue.due_date).getDate()} · ${derived.nextDue.description ?? ""}`
               : "예정된 마감 없음",
             valStyle: {
-              fontSize: 20,
-              paddingTop: 8,
               color: nextDueInfo?.color,
             },
           },
@@ -334,15 +332,25 @@ export default function OverviewPage() {
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-soft)" }}>
             {focusMeeting
-              ? `${meetingDateLabel(focusMeeting)} · ${focusMeeting.total_minutes}분 · ${team?.member_count ?? "-"}명`
+              ? `${meetingDateLabel(focusMeeting)} · ${focusMeeting.total_minutes}분 · ${focusMeeting.meeting_type === "regular" ? "전체 회의" : "부분 회의"}`
               : "회의 관리에서 새 회의를 만들어 보세요."}
           </div>
-          <div style={{ display: "flex", gap: 7, margin: "14px 0 4px" }}>
-            {(team?.members ?? []).slice(0, 4).map((m, i) => (
-              <div key={i} className={`av a${(i % 4) + 1} av-sm`}>
-                {m.name[0]}
-              </div>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0 4px" }}>
+            <div style={{ display: "flex" }}>
+              {(team?.members ?? []).slice(0, 5).map((m, i) => (
+                <div
+                  key={i}
+                  className={`av a${(i % 4) + 1} av-sm`}
+                  title={m.name}
+                  style={{ marginLeft: i === 0 ? 0 : -8, boxShadow: "0 0 0 2px var(--surface)" }}
+                >
+                  {m.name[0]}
+                </div>
+              ))}
+            </div>
+            <span style={{ fontSize: 11.5, color: "var(--text-soft)", fontWeight: 600 }}>
+              {team?.member_count ?? 0}명 참여
+            </span>
           </div>
           <button
             className="btn btn-primary btn-full"
