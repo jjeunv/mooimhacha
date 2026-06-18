@@ -51,6 +51,18 @@ export function isSpeechSupported(): boolean {
   return getRecognitionCtor() !== null;
 }
 
+// 종결어미 기반 구두점 복원 — Web Speech API는 구두점을 붙이지 않음
+function addPunctuation(text: string): string {
+  return text
+    // 중간 문장: 종결어미 + 공백 → 마침표 삽입
+    .replace(/(습니다|있습니다|없습니다|같습니다|됩니다|입니다|겠습니다|드립니다|드리겠습니다|하겠습니다)([ ]+)/g, '$1. ')
+    .replace(/(해요|있어요|없어요|같아요|예요|이에요|네요|거예요|래요|대요|아요|어요|하고요|이고요|이에요)([ ]+)/g, '$1. ')
+    // 의문형
+    .replace(/(습니까|합니까|인가요|나요|을까요|ㄹ까요|인지요)([ ]+)/g, '$1? ')
+    // 마지막 문장 마침표 (아직 없으면)
+    .replace(/(습니다|있습니다|없습니다|같습니다|됩니다|입니다|겠습니다|드립니다|해요|있어요|없어요|같아요|예요|이에요|네요|거예요|하고요|이고요|아요|어요)$/, '$1.');
+}
+
 export interface SpeechCallbacks {
   // 확정 발화 1건
   onFinal: (text: string, confidence: number | null) => void;
@@ -103,7 +115,7 @@ export function createSpeechRecognizer(
         typeof alt.confidence === "number" && alt.confidence > 0
           ? alt.confidence
           : null;
-      cb.onFinal(text, confidence);
+      cb.onFinal(addPunctuation(text), confidence);
     }
   };
 
