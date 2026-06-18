@@ -66,6 +66,7 @@ function baseMeetingReq(
     meeting: {
       id: 7,
       total_minutes: 60,
+      scheduled_at: T0,
       t0_timestamp: T0,
       ended_at: ENDED,
       meeting_type: 'regular',
@@ -187,6 +188,7 @@ describe('deriveMemberData — 원시 이벤트 → 외부 MemberMeetingData', (
       meeting: {
         id: 7,
         total_minutes: 60,
+        scheduled_at: T0,
         t0_timestamp: T0,
         ended_at: ENDED,
         meeting_type: 'adhoc',

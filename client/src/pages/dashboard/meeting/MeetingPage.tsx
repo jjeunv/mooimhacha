@@ -23,7 +23,7 @@ import type {
 } from "@/lib/types";
 import type { TeamContext } from "../DashboardPage";
 
-type Tab = "agenda" | "speak" | "attendance" | "decision" | "summary";
+type Tab = "agenda" | "speak" | "attendance" | "decision" | "summary" | "settings";
 type Status = "할 일" | "진행 중" | "완료";
 
 const STATUS_TO_API: Record<Status, string> = {
@@ -124,6 +124,7 @@ export default function MeetingPage() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<ActionItem[]>([]);
   const [members, setMembers] = useState<TeamContribution[]>([]);
 
@@ -138,10 +139,18 @@ export default function MeetingPage() {
   const [confirmSaving, setConfirmSaving] = useState(false);
   // 발언 탭 최초 진입 시 바 애니메이션을 한 번만 실행하기 위한 플래그.
   // state 대신 ref를 쓰는 이유: 값 변경이 리렌더를 유발할 필요 없음.
-  const barsAnimated = useRef(false);
 
   // 새 회의 모달 입력값
   const [newTopic, setNewTopic] = useState("");
+  // 회의 설정 탭
+  const [editTopic, setEditTopic] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editMinutes, setEditMinutes] = useState<number | "">(30);
+  const [editMeetingType, setEditMeetingType] = useState<"regular" | "partial">("regular");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deletingMeeting, setDeletingMeeting] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
   const [newMeetingType, setNewMeetingType] = useState<"regular" | "partial">(
     "regular",
   );
@@ -215,6 +224,56 @@ export default function MeetingPage() {
     }
   }, [tab, selected?.status, loadPendingTasks]);
 
+  // 설정 탭 진입 시 현재 값으로 초기화
+  useEffect(() => {
+    if (tab === "settings" && selected) {
+      setEditTopic(selected.topic ?? "");
+      const d = new Date(selected.scheduled_at);
+      setEditDate(d.toLocaleDateString("sv-SE"));
+      setEditTime(
+        d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }),
+      );
+      setEditMinutes(selected.total_minutes ?? 30);
+      setEditMeetingType(selected.meeting_type ?? "regular");
+    }
+  }, [tab, selected?.id]);
+
+  async function saveMeetingSettings() {
+    if (!selectedId || editSaving) return;
+    setEditSaving(true);
+    try {
+      await apiPatch(`/meetings/${selectedId}`, {
+        topic: editTopic.trim() || undefined,
+        scheduled_at: new Date(`${editDate}T${editTime}:00`).toISOString(),
+        total_minutes: editMinutes || undefined,
+        meeting_type: editMeetingType,
+      });
+      await loadMeetings();
+      showToast("회의 정보가 수정되었습니다.");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleDeleteMeeting() {
+    if (!selectedId || busy) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/meetings/${selectedId}`);
+      setSelectedId(null);
+      setDeletingMeeting(false);
+      setDeleteConfirmInput("");
+      showToast("회의가 삭제되었습니다.");
+      await loadMeetings();
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // 팀 멤버 목록 (확정 모달 담당자 선택용)
   useEffect(() => {
     if (!team) return;
@@ -270,7 +329,6 @@ export default function MeetingPage() {
       return;
     }
     let alive = true;
-    barsAnimated.current = false;
     setTranscript(null);
     void Promise.allSettled([
       apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`),
@@ -357,8 +415,7 @@ export default function MeetingPage() {
   }, [selected]);
 
   useEffect(() => {
-    if (tab === "speak" && !barsAnimated.current) {
-      barsAnimated.current = true;
+    if (tab === "speak") {
       requestAnimationFrame(() => {
         document
           .querySelectorAll<HTMLElement>(".speak-bar i[data-w]")
@@ -691,6 +748,31 @@ export default function MeetingPage() {
     }
   }
 
+  async function refreshDetail() {
+    if (!selectedId || refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadMeetings();
+      const [ag, sp, dc] = await Promise.allSettled([
+        apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`),
+        apiGet<{ scores: MeetingContribution[] }>(
+          `/meetings/${selectedId}/contributions`,
+        ),
+        apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`),
+      ]);
+      if (ag.status === "fulfilled") setAgendas(ag.value);
+      if (sp.status === "fulfilled") setSpeak(sp.value.scores);
+      if (dc.status === "fulfilled") setDecisions(dc.value);
+      setTranscript(null);
+      if (selected?.status === "ended") {
+        await loadAttendance(selectedId);
+        await loadPendingTasks();
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   // status → CSS 클래스/레이블 매핑. as const로 유니온 키 타입 접근 보장.
   const spillCls = {
     active: "spill-live",
@@ -726,8 +808,8 @@ export default function MeetingPage() {
     [meetings],
   );
 
-  // 발언 경고: 비중 10% 미만 멤버
-  const lowSpeaker = speak.find(
+  // 발언 경고: 비중 10% 미만 멤버 (전체)
+  const lowSpeakers = speak.filter(
     (s) => s.speech_ratio != null && s.speech_ratio < 0.1,
   );
   return (
@@ -835,36 +917,57 @@ export default function MeetingPage() {
                           ? "전체 회의"
                           : "부분 회의"}
                       </span>
+                      {selected.status === "ended" &&
+                        summaries.get(selected.id)?.attended_count != null && (
+                          <span className="mdh-attended-count">
+                            <i className="ti ti-user" />
+                            {summaries.get(selected.id)!.attended_count}명
+                          </span>
+                        )}
                     </div>
                   </div>
-                  {selected.status === "scheduled" && (
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
                     <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setModalOpen("headset")}
-                      disabled={busy}
+                      className="btn btn-sm"
+                      onClick={() => void refreshDetail()}
+                      disabled={refreshing}
+                      title="새로고침"
                     >
-                      <i className="ti ti-player-play" /> 회의 시작
+                      <i
+                        className={`ti ${refreshing ? "ti-loader-2" : "ti-refresh"}`}
+                      />
                     </button>
-                  )}
-                  {selected.status === "active" && hasJoined === true && (
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => void endMeeting()}
-                      disabled={busy}
-                    >
-                      <i className="ti ti-player-stop" /> 회의 종료
-                    </button>
-                  )}
-                  {selected.status === "active" && hasJoined !== true && (
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => void attendMeeting()}
-                      disabled={joiningMeeting || hasJoined === null}
-                    >
-                      <i className="ti ti-login" />{" "}
-                      {joiningMeeting ? "참가 중…" : "회의 참여"}
-                    </button>
-                  )}
+                    {selected.status === "scheduled" && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setModalOpen("headset")}
+                        disabled={busy}
+                      >
+                        <i className="ti ti-player-play" /> 회의 시작
+                      </button>
+                    )}
+                    {selected.status === "active" && hasJoined === true && (
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => void endMeeting()}
+                        disabled={busy}
+                      >
+                        <i className="ti ti-player-stop" /> 회의 종료
+                      </button>
+                    )}
+                    {selected.status === "active" && hasJoined !== true && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void attendMeeting()}
+                        disabled={joiningMeeting || hasJoined === null}
+                      >
+                        <i className="ti ti-login" />{" "}
+                        {joiningMeeting ? "참가 중…" : "회의 참여"}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="mdh-meta">
                   <div className="mdh-meta-dates">
@@ -943,6 +1046,7 @@ export default function MeetingPage() {
                       "attendance",
                       "decision",
                       "summary",
+                      "settings",
                     ] as Tab[]
                   ).map((t) => (
                     <div
@@ -957,6 +1061,7 @@ export default function MeetingPage() {
                           attendance: "출결",
                           decision: "결정 사항",
                           summary: "회의 요약",
+                          settings: "회의 설정",
                         }[t]
                       }
                     </div>
@@ -1093,7 +1198,7 @@ export default function MeetingPage() {
                         </div>
                       );
                     })}
-                    {lowSpeaker && (
+                    {lowSpeakers.length > 0 && (
                       <div
                         className="summary-box"
                         style={{
@@ -1106,8 +1211,8 @@ export default function MeetingPage() {
                           className="ti ti-alert-triangle"
                           style={{ color: "var(--coral)" }}
                         />
-                        {lowSpeaker.name}님의 발언 비중이 10% 미만입니다. 의견을
-                        물어봐 주세요.
+                        {lowSpeakers.map((s) => s.name).join(", ")}님의 발언
+                        비중이 10% 미만입니다. 의견을 물어봐 주세요.
                       </div>
                     )}
                     {/* 발화 기록 — 종료된 회의만 */}
@@ -1176,21 +1281,17 @@ export default function MeetingPage() {
                                         {speaker?.name ?? `사용자 ${g.user_id}`}
                                         <span className="utt-time">
                                           {selected.t0_timestamp
-                                            ? new Date(
-                                                new Date(
-                                                  selected.t0_timestamp,
-                                                ).getTime() +
-                                                  g.started_at_offset_ms,
-                                              ).toLocaleTimeString("ko-KR", {
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                                second: "2-digit",
-                                              })
-                                            : fmt(
-                                                Math.floor(
-                                                  g.started_at_offset_ms / 1000,
-                                                ),
-                                              )}
+                                            ? (() => {
+                                                const t0 = new Date(selected.t0_timestamp).getTime();
+                                                const tf = (offset: number) =>
+                                                  new Date(t0 + offset).toLocaleTimeString("ko-KR", {
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                    second: "2-digit",
+                                                  });
+                                                return `${tf(g.started_at_offset_ms)} ~ ${tf(g.ended_at_offset_ms)}`;
+                                              })()
+                                            : `${fmt(Math.floor(g.started_at_offset_ms / 1000))} ~ ${fmt(Math.floor(g.ended_at_offset_ms / 1000))}`}
                                         </span>
                                       </span>
                                       <span className="utt-text">{g.text}</span>
@@ -1412,7 +1513,7 @@ export default function MeetingPage() {
                       <div className="summary-box">
                         <i className="ti ti-sparkles" />
                         회의가 종료되면 AI가 자동으로
-                        결정사항·액션아이템·회의록을 요약합니다.
+                        결정 사항·태스크·회의록을 요약합니다.
                       </div>
                     ) : (
                       <>
@@ -1546,6 +1647,103 @@ export default function MeetingPage() {
                         </div>
                       </>
                     )}
+                  </div>
+                )}
+
+                {/* 회의 설정 */}
+                {tab === "settings" && (
+                  <div className="tab-panel active">
+                    <div className="panel-label">회의 정보 수정</div>
+                    <div className="field">
+                      <label className="field-label">회의 이름</label>
+                      <input
+                        className="input"
+                        placeholder="예) 중간 점검 회의"
+                        value={editTopic}
+                        onChange={(e) => setEditTopic(e.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="field-label">회의 유형</label>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          className={`btn btn-sm${editMeetingType === "regular" ? " btn-primary" : ""}`}
+                          disabled={selected.status === "ended"}
+                          onClick={() => setEditMeetingType("regular")}
+                        >
+                          전체 회의
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm${editMeetingType === "partial" ? " btn-primary" : ""}`}
+                          disabled={selected.status === "ended"}
+                          onClick={() => setEditMeetingType("partial")}
+                        >
+                          부분 회의
+                        </button>
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label className="field-label">날짜</label>
+                        <input
+                          className="input"
+                          type="date"
+                          value={editDate}
+                          disabled={selected.status === "ended"}
+                          onChange={(e) => setEditDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="field-label">시간</label>
+                        <input
+                          className="input"
+                          type="time"
+                          value={editTime}
+                          disabled={selected.status === "ended"}
+                          onChange={(e) => setEditTime(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">예상 소요 시간 (분)</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        value={editMinutes}
+                        disabled={selected.status === "ended"}
+                        onChange={(e) =>
+                          setEditMinutes(
+                            e.target.value === "" ? "" : Number(e.target.value),
+                          )
+                        }
+                      />
+                    </div>
+                    {selected.status === "ended" && (
+                      <div className="summary-box" style={{ marginBottom: 8 }}>
+                        <i className="ti ti-info-circle" />
+                        완료된 회의는 이름만 수정할 수 있습니다.
+                      </div>
+                    )}
+                    <button
+                      className="btn btn-primary"
+                      style={{ marginTop: 8 }}
+                      onClick={() => void saveMeetingSettings()}
+                      disabled={editSaving}
+                    >
+                      {editSaving ? "저장 중…" : "저장"}
+                    </button>
+                    <div style={{ marginTop: 32, borderTop: "1px solid var(--border-2)", paddingTop: 16 }}>
+                      <div className="panel-label" style={{ color: "var(--coral)" }}>위험 구역</div>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => setDeletingMeeting(true)}
+                      >
+                        <i className="ti ti-trash" /> 회의 삭제
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1852,6 +2050,43 @@ export default function MeetingPage() {
           onConfirm={() => void deleteDecision()}
           onClose={() => setDeletingDecision(null)}
         />
+      )}
+
+      {/* 회의 삭제 확인 모달 */}
+      {deletingMeeting && (
+        <Modal
+          title="회의 삭제"
+          onClose={() => { setDeletingMeeting(false); setDeleteConfirmInput(""); }}
+          actions={
+            <>
+              <button className="btn" onClick={() => { setDeletingMeeting(false); setDeleteConfirmInput(""); }}>
+                취소
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={deleteConfirmInput !== "삭제하겠습니다" || busy}
+                onClick={() => void handleDeleteMeeting()}
+              >
+                삭제
+              </button>
+            </>
+          }
+        >
+          <div className="modal-sub">
+            회의와 관련된 모든 데이터(발화·결정·아젠다)가 영구 삭제됩니다.
+          </div>
+          <div className="field">
+            <label className="field-label">
+              확인을 위해 <strong>삭제하겠습니다</strong>를 입력하세요
+            </label>
+            <input
+              className="input"
+              placeholder="삭제하겠습니다"
+              value={deleteConfirmInput}
+              onChange={(e) => setDeleteConfirmInput(e.target.value)}
+            />
+          </div>
+        </Modal>
       )}
 
       {/* AI 태스크 확정 모달 */}

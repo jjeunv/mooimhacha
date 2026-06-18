@@ -22,7 +22,7 @@ interface Team {
   course_name: string;
   my_role: "leader" | "member";
   member_count: number;
-  members: string[];
+  members: { name: string; role: string }[];
 }
 
 // 내 태스크/예정 회의에 소속 그룹 이름을 같이 표기하기 위한 합성 타입
@@ -549,9 +549,9 @@ export default function HomePage() {
                       </span>
                     </div>
                     <div className="gc-avs">
-                      {team.members.slice(0, 4).map((name, i) => (
+                      {team.members.slice(0, 4).map((m, i) => (
                         <div key={i} className={`av a${(i % 4) + 1} av-sm`}>
-                          {name[0]}
+                          {m.name[0]}
                         </div>
                       ))}
                       <span className="gc-more">{team.member_count}명</span>

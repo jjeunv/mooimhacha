@@ -338,9 +338,9 @@ export default function OverviewPage() {
               : "회의 관리에서 새 회의를 만들어 보세요."}
           </div>
           <div style={{ display: "flex", gap: 7, margin: "14px 0 4px" }}>
-            {(team?.members ?? []).slice(0, 4).map((name, i) => (
+            {(team?.members ?? []).slice(0, 4).map((m, i) => (
               <div key={i} className={`av a${(i % 4) + 1} av-sm`}>
-                {name[0]}
+                {m.name[0]}
               </div>
             ))}
           </div>

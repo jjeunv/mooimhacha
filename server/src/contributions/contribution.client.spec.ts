@@ -33,6 +33,7 @@ const MEETING_REQ: MeetingScoreRequest = {
   meeting: {
     id: 7,
     total_minutes: 60,
+    scheduled_at: '2026-06-01T00:00:00.000Z',
     t0_timestamp: '2026-06-01T00:00:00.000Z',
     ended_at: '2026-06-01T01:00:00.000Z',
     meeting_type: 'regular',

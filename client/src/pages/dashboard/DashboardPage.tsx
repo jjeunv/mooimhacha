@@ -33,7 +33,7 @@ export interface TeamContext {
   course_name: string;
   my_role: "leader" | "member";
   member_count: number;
-  members: string[];
+  members: { name: string; role: string }[];
 }
 
 const NAV_ITEMS = [
@@ -165,11 +165,12 @@ export default function DashboardPage() {
 
         <div className="sb-members">
           <div className="sb-sec">팀원</div>
-          {(team?.members ?? []).map((name, i) => (
+          {(team?.members ?? []).map((m, i) => (
             <div key={i} className="sb-mrow">
-              <div className={`av a${(i % 4) + 1} av-sm`}>{name[0]}</div>
-              {name}
-              {name === currentUser?.name && <span className="me-tag">나</span>}
+              <div className={`av a${(i % 4) + 1} av-sm`}>{m.name[0]}</div>
+              {m.name}
+              {m.role === "leader" && <span className="leader-tag">팀장</span>}
+              {m.name === currentUser?.name && <span className="me-tag">나</span>}
             </div>
           ))}
         </div>

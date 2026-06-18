@@ -97,11 +97,11 @@ export class TeamsService {
     });
     const userMap = new Map(users.map((u) => [Number(u.id), u.name]));
 
-    const membersByTeam = new Map<number, string[]>();
+    const membersByTeam = new Map<number, { name: string; role: string }[]>();
     for (const m of allMemberships) {
       const tid = Number(m.team_id);
       if (!membersByTeam.has(tid)) membersByTeam.set(tid, []);
-      membersByTeam.get(tid)!.push(userMap.get(Number(m.user_id)) ?? '?');
+      membersByTeam.get(tid)!.push({ name: userMap.get(Number(m.user_id)) ?? '?', role: m.role });
     }
 
     const counts: { team_id: string; count: string }[] =
