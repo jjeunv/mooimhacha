@@ -603,7 +603,7 @@ export default function TasksPage() {
             </button>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {team?.my_role === "leader" && (
             <button className="btn btn-sm" onClick={shareTaskStatus}>
               <i className="ti ti-share" /> 공유하기
