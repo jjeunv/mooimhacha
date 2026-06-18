@@ -1109,63 +1109,73 @@ export default function MeetingPage() {
                             저장된 발화 기록이 없습니다.
                           </div>
                         ) : (
-                          transcript.sections
-                            .filter((s) => s.groups.length > 0)
-                            .map((section) => (
-                              <div
-                                key={section.agenda_id}
-                                className="utt-section"
-                              >
-                                <div className="utt-section-title">
-                                  {section.title}
-                                </div>
-                                {section.groups.map((g, gi) => {
-                                  const speaker = speak.find(
-                                    (s) => s.user_id === g.user_id,
-                                  );
-                                  const idx = speak.findIndex(
-                                    (s) => s.user_id === g.user_id,
-                                  );
-                                  return (
-                                    <div key={gi} className="utt-row">
-                                      <div
-                                        className={`av a${(idx % 4) + 1} av-sm`}
-                                      >
-                                        {(speaker?.name ?? "?")[0]}
-                                      </div>
-                                      <div className="utt-body">
-                                        <span className="utt-name">
-                                          {speaker?.name ??
-                                            `사용자 ${g.user_id}`}
-                                          <span className="utt-time">
-                                            {selected.t0_timestamp
-                                              ? new Date(
-                                                  new Date(
-                                                    selected.t0_timestamp,
-                                                  ).getTime() +
-                                                    g.started_at_offset_ms,
-                                                ).toLocaleTimeString("ko-KR", {
-                                                  hour: "2-digit",
-                                                  minute: "2-digit",
-                                                  second: "2-digit",
-                                                })
-                                              : fmt(
-                                                  Math.floor(
-                                                    g.started_at_offset_ms /
-                                                      1000,
-                                                  ),
-                                                )}
-                                          </span>
-                                        </span>
-                                        <span className="utt-text">
-                                          {g.text}
-                                        </span>
-                                      </div>
+                          (() => {
+                            const flat = transcript.sections
+                              .filter((s) => s.groups.length > 0)
+                              .flatMap((s) =>
+                                s.groups.map((g) => ({
+                                  ...g,
+                                  sectionId: s.agenda_id,
+                                  sectionTitle: s.title,
+                                })),
+                              )
+                              .sort(
+                                (a, b) =>
+                                  a.started_at_offset_ms -
+                                  b.started_at_offset_ms,
+                              );
+                            return flat.map((g, i) => {
+                              const showHeader =
+                                i === 0 ||
+                                g.sectionId !== flat[i - 1].sectionId;
+                              const speaker = speak.find(
+                                (s) => s.user_id === g.user_id,
+                              );
+                              const idx = speak.findIndex(
+                                (s) => s.user_id === g.user_id,
+                              );
+                              return (
+                                <div key={i}>
+                                  {showHeader && (
+                                    <div className="utt-section-title">
+                                      {g.sectionTitle}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            ))
+                                  )}
+                                  <div className="utt-row">
+                                    <div
+                                      className={`av a${(idx % 4) + 1} av-sm`}
+                                    >
+                                      {(speaker?.name ?? "?")[0]}
+                                    </div>
+                                    <div className="utt-body">
+                                      <span className="utt-name">
+                                        {speaker?.name ?? `사용자 ${g.user_id}`}
+                                        <span className="utt-time">
+                                          {selected.t0_timestamp
+                                            ? new Date(
+                                                new Date(
+                                                  selected.t0_timestamp,
+                                                ).getTime() +
+                                                  g.started_at_offset_ms,
+                                              ).toLocaleTimeString("ko-KR", {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                                second: "2-digit",
+                                              })
+                                            : fmt(
+                                                Math.floor(
+                                                  g.started_at_offset_ms / 1000,
+                                                ),
+                                              )}
+                                        </span>
+                                      </span>
+                                      <span className="utt-text">{g.text}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()
                         )}
                       </>
                     )}
