@@ -124,6 +124,7 @@ export default function MeetingPage() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<ActionItem[]>([]);
   const [members, setMembers] = useState<TeamContribution[]>([]);
 
@@ -691,6 +692,31 @@ export default function MeetingPage() {
     }
   }
 
+  async function refreshDetail() {
+    if (!selectedId || refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadMeetings();
+      const [ag, sp, dc] = await Promise.allSettled([
+        apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`),
+        apiGet<{ scores: MeetingContribution[] }>(
+          `/meetings/${selectedId}/contributions`,
+        ),
+        apiGet<Decision[]>(`/decisions?meeting_id=${selectedId}`),
+      ]);
+      if (ag.status === "fulfilled") setAgendas(ag.value);
+      if (sp.status === "fulfilled") setSpeak(sp.value.scores);
+      if (dc.status === "fulfilled") setDecisions(dc.value);
+      setTranscript(null);
+      if (selected?.status === "ended") {
+        await loadAttendance(selectedId);
+        await loadPendingTasks();
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   // status → CSS 클래스/레이블 매핑. as const로 유니온 키 타입 접근 보장.
   const spillCls = {
     active: "spill-live",
@@ -837,34 +863,48 @@ export default function MeetingPage() {
                       </span>
                     </div>
                   </div>
-                  {selected.status === "scheduled" && (
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
                     <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setModalOpen("headset")}
-                      disabled={busy}
+                      className="btn btn-sm"
+                      onClick={() => void refreshDetail()}
+                      disabled={refreshing}
+                      title="새로고침"
                     >
-                      <i className="ti ti-player-play" /> 회의 시작
+                      <i
+                        className={`ti ${refreshing ? "ti-loader-2" : "ti-refresh"}`}
+                      />
                     </button>
-                  )}
-                  {selected.status === "active" && hasJoined === true && (
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => void endMeeting()}
-                      disabled={busy}
-                    >
-                      <i className="ti ti-player-stop" /> 회의 종료
-                    </button>
-                  )}
-                  {selected.status === "active" && hasJoined !== true && (
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => void attendMeeting()}
-                      disabled={joiningMeeting || hasJoined === null}
-                    >
-                      <i className="ti ti-login" />{" "}
-                      {joiningMeeting ? "참가 중…" : "회의 참여"}
-                    </button>
-                  )}
+                    {selected.status === "scheduled" && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setModalOpen("headset")}
+                        disabled={busy}
+                      >
+                        <i className="ti ti-player-play" /> 회의 시작
+                      </button>
+                    )}
+                    {selected.status === "active" && hasJoined === true && (
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => void endMeeting()}
+                        disabled={busy}
+                      >
+                        <i className="ti ti-player-stop" /> 회의 종료
+                      </button>
+                    )}
+                    {selected.status === "active" && hasJoined !== true && (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void attendMeeting()}
+                        disabled={joiningMeeting || hasJoined === null}
+                      >
+                        <i className="ti ti-login" />{" "}
+                        {joiningMeeting ? "참가 중…" : "회의 참여"}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="mdh-meta">
                   <div className="mdh-meta-dates">
