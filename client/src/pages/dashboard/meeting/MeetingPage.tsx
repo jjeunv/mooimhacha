@@ -139,7 +139,6 @@ export default function MeetingPage() {
   const [confirmSaving, setConfirmSaving] = useState(false);
   // 발언 탭 최초 진입 시 바 애니메이션을 한 번만 실행하기 위한 플래그.
   // state 대신 ref를 쓰는 이유: 값 변경이 리렌더를 유발할 필요 없음.
-  const barsAnimated = useRef(false);
 
   // 새 회의 모달 입력값
   const [newTopic, setNewTopic] = useState("");
@@ -271,7 +270,6 @@ export default function MeetingPage() {
       return;
     }
     let alive = true;
-    barsAnimated.current = false;
     setTranscript(null);
     void Promise.allSettled([
       apiGet<Agenda[]>(`/meetings/${selectedId}/agendas`),
@@ -358,8 +356,7 @@ export default function MeetingPage() {
   }, [selected]);
 
   useEffect(() => {
-    if (tab === "speak" && !barsAnimated.current) {
-      barsAnimated.current = true;
+    if (tab === "speak") {
       requestAnimationFrame(() => {
         document
           .querySelectorAll<HTMLElement>(".speak-bar i[data-w]")
