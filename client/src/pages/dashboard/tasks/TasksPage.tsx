@@ -65,6 +65,12 @@ function fmtTime(d: Date): string {
   return `${ampm} ${h12}:${String(m).padStart(2, "0")}`;
 }
 
+function fmtCompleted(iso: string): string {
+  const d = new Date(iso);
+  const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${d.getMonth() + 1}/${d.getDate()}(${DAYS[d.getDay()]}) ${fmtTime(d)}`;
+}
+
 // Date → datetime-local input 값 ("YYYY-MM-DDTHH:mm")
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -113,10 +119,21 @@ export default function TasksPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [statusChangePending, setStatusChangePending] = useState<{
+    task: ActionItem;
+    newStatus: Status;
+  } | null>(null);
 
   // 드래그 앤 드롭
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverCol, setDragOverCol] = useState<Status | null>(null);
+
+  // 카카오 공유 배치
+  const [shareBatches, setShareBatches] = useState<
+    { title: string; desc: string; img: string }[][]
+  >([]);
+  const [shareBatchIdx, setShareBatchIdx] = useState(0);
+  const [shareTitle, setShareTitle] = useState("");
 
   // 기한 연장: 태스크별 최신 요청 (action_item_id → 요청)
   const [extensions, setExtensions] = useState<Map<number, TaskExtension>>(
@@ -272,7 +289,9 @@ export default function TasksPage() {
           }}
         >
           <i className="ti ti-calendar-plus" />
-          {ext?.status === "rejected" ? "연장 거절됨 · 재요청" : "기한 연장 요청"}
+          {ext?.status === "rejected"
+            ? "연장 거절됨 · 재요청"
+            : "기한 연장 요청"}
         </button>
       );
     }
@@ -332,6 +351,9 @@ export default function TasksPage() {
         });
     });
   }, [done, total]);
+
+  const canEdit = (t: ActionItem) =>
+    !t.assignee_id || t.assignee_id === currentUser?.id;
 
   function openEdit(task: ActionItem) {
     setEditTarget(task);
@@ -413,8 +435,105 @@ export default function TasksPage() {
     }
   }
 
+  function requestStatusChange(task: ActionItem, newStatus: Status) {
+    if (task.status === "done") {
+      setStatusChangePending({ task, newStatus });
+    } else {
+      void changeStatus(task, newStatus);
+    }
+  }
+
   function toggleList(task: ActionItem) {
-    void changeStatus(task, task.status === "done" ? "할 일" : "완료");
+    requestStatusChange(task, task.status === "done" ? "할 일" : "완료");
+  }
+
+  function shareTaskStatus() {
+    if (!team) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayExpiring = tasks.filter((t) => {
+      if (t.status === "done" || !t.due_date) return false;
+      const dueDay = new Date(t.due_date);
+      dueDay.setHours(0, 0, 0, 0);
+      return dueDay >= today && dueDay < tomorrow;
+    });
+
+    const overdue = tasks.filter((t) => {
+      if (t.status === "done" || !t.due_date) return false;
+      const dueDay = new Date(t.due_date);
+      dueDay.setHours(0, 0, 0, 0);
+      return dueDay < today;
+    });
+
+    if (todayExpiring.length === 0 && overdue.length === 0) {
+      showToast("공유할 내용이 없습니다.");
+      return;
+    }
+
+    if (!window.Kakao?.isInitialized()) {
+      showToast("카카오 SDK가 초기화되지 않았습니다.", "error");
+      return;
+    }
+
+    const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()}(${DAYS[now.getDay()]})`;
+
+    const origin = window.location.origin;
+    const IMG_DONE = `${origin}/icon-done.png`;
+    const IMG_WARN = `${origin}/icon-warning.png`;
+
+    const items: { title: string; desc: string; img: string }[] = [
+      ...todayExpiring.map((t) => ({
+        title: `🔔 ${t.description}`,
+        desc: `오늘 마감 · ${nameOf(t.assignee_id)}`,
+        img: IMG_DONE,
+      })),
+      ...overdue.map((t) => {
+        const dueDay = new Date(t.due_date!);
+        dueDay.setHours(0, 0, 0, 0);
+        const days = Math.round(
+          (today.getTime() - dueDay.getTime()) / 86400000,
+        );
+        return {
+          title: `⚠️ ${t.description}`,
+          desc: `D+${days} · ${nameOf(t.assignee_id)}`,
+          img: IMG_WARN,
+        };
+      }),
+    ];
+
+    const batches: { title: string; desc: string; img: string }[][] = [];
+    for (let i = 0; i < items.length; i += 5) {
+      batches.push(items.slice(i, i + 5));
+    }
+
+    setShareTitle(`태스크 현황 (${dateStr})`);
+    setShareBatches(batches);
+    setShareBatchIdx(0);
+  }
+
+  function sendCurrentBatch() {
+    const batch = shareBatches[shareBatchIdx];
+    if (!batch) return;
+
+    const templateArgs: Record<string, string> = { title: shareTitle };
+    for (let i = 0; i < 5; i++) {
+      templateArgs[`t${i + 1}`] = batch[i]?.title ?? "";
+      templateArgs[`d${i + 1}`] = batch[i]?.desc ?? "";
+      templateArgs[`img${i + 1}`] = batch[i]?.img ?? "";
+    }
+
+    window.Kakao.Share.sendCustom({ templateId: 134415, templateArgs });
+
+    if (shareBatchIdx + 1 >= shareBatches.length) {
+      setShareBatches([]);
+    } else {
+      setShareBatchIdx(shareBatchIdx + 1);
+    }
   }
 
   async function addTask() {
@@ -484,12 +603,19 @@ export default function TasksPage() {
             </button>
           </div>
         </div>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => setModalOpen(true)}
-        >
-          <i className="ti ti-plus" /> 태스크 추가
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {team?.my_role === "leader" && (
+            <button className="btn btn-sm" onClick={shareTaskStatus}>
+              <i className="ti ti-share" /> 공유하기
+            </button>
+          )}
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setModalOpen(true)}
+          >
+            <i className="ti ti-plus" /> 태스크 추가
+          </button>
+        </div>
       </div>
 
       <div className="prog-strip">
@@ -527,8 +653,12 @@ export default function TasksPage() {
                   setDraggingId(null);
                   const id = Number(e.dataTransfer.getData("taskId"));
                   const task = tasks.find((t) => t.id === id);
-                  if (task && API_TO_STATUS[task.status] !== col) {
-                    void changeStatus(task, col);
+                  if (
+                    task &&
+                    canEdit(task) &&
+                    API_TO_STATUS[task.status] !== col
+                  ) {
+                    requestStatusChange(task, col);
                   }
                 }}
               >
@@ -561,19 +691,24 @@ export default function TasksPage() {
                   return (
                     <div
                       key={t.id}
-                      draggable
+                      draggable={canEdit(t)}
                       className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
                       style={{
-                        cursor: draggingId === t.id ? "grabbing" : "grab",
+                        cursor: canEdit(t)
+                          ? draggingId === t.id
+                            ? "grabbing"
+                            : "grab"
+                          : "default",
                         ...stripeStyle(t.assignee_id, danger, warn),
                       }}
                       onDragStart={(e) => {
+                        if (!canEdit(t)) return;
                         setDraggingId(t.id);
                         e.dataTransfer.setData("taskId", String(t.id));
                         e.dataTransfer.effectAllowed = "move";
                       }}
                       onDragEnd={() => setDraggingId(null)}
-                      onClick={() => openEdit(t)}
+                      onClick={() => canEdit(t) && openEdit(t)}
                     >
                       <div className="tc-head">
                         <div
@@ -598,31 +733,53 @@ export default function TasksPage() {
                           </span>
                           {who}
                         </span>
-                        {dd.label && (
-                          <div
-                            className="tc-due"
-                            style={{
-                              color: danger
-                                ? "var(--coral)"
-                                : warn
-                                  ? "var(--amber)"
-                                  : "var(--text-soft)",
-                            }}
-                          >
-                            <i className="ti ti-calendar" />
-                            {dd.label}
-                            {dd.timeLabel && (
-                              <span style={{ fontWeight: 500, marginLeft: 2 }}>
-                                {dd.timeLabel}
-                              </span>
-                            )}
-                            {dd.dDay && (
-                              <span style={{ fontWeight: 700, marginLeft: 4 }}>
-                                {dd.dDay}
-                              </span>
-                            )}
-                          </div>
-                        )}
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-end",
+                            gap: 2,
+                          }}
+                        >
+                          {dd.label && (
+                            <div
+                              className="tc-due"
+                              style={{
+                                color: danger
+                                  ? "var(--coral)"
+                                  : warn
+                                    ? "var(--amber)"
+                                    : "var(--text-soft)",
+                              }}
+                            >
+                              <i className="ti ti-calendar" />
+                              {dd.label}
+                              {dd.timeLabel && (
+                                <span
+                                  style={{ fontWeight: 500, marginLeft: 2 }}
+                                >
+                                  {dd.timeLabel}
+                                </span>
+                              )}
+                              {dd.dDay && (
+                                <span
+                                  style={{ fontWeight: 700, marginLeft: 4 }}
+                                >
+                                  {dd.dDay}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {status === "완료" && t.completed_at && (
+                            <div
+                              className="tc-due"
+                              style={{ color: "var(--green)" }}
+                            >
+                              <i className="ti ti-check" />
+                              {fmtCompleted(t.completed_at)} 완료
+                            </div>
+                          )}
+                        </div>
                       </div>
                       {renderExtension(t)}
                     </div>
@@ -647,58 +804,77 @@ export default function TasksPage() {
             const warn = status !== "완료" && dd.warn;
             return (
               <div key={t.id} className="lrow-wrap">
-              <div
-                className={`lrow ${danger ? "danger" : ""} ${warn ? "warn" : ""}`}
-                style={{
-                  cursor: "pointer",
-                  ...stripeStyle(t.assignee_id, danger, warn),
-                }}
-                onClick={() => openEdit(t)}
-              >
                 <div
-                  className={`t-check ${status === "완료" ? "done" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleList(t);
+                  className={`lrow ${danger ? "danger" : ""} ${warn ? "warn" : ""}`}
+                  style={{
+                    cursor: canEdit(t) ? "pointer" : "default",
+                    ...stripeStyle(t.assignee_id, danger, warn),
                   }}
+                  onClick={() => canEdit(t) && openEdit(t)}
                 >
-                  <i className="ti ti-check" />
-                </div>
-                <div
-                  className={`lrow-title ${status === "완료" ? "done" : ""}`}
-                >
-                  {t.description}
-                </div>
-                <span className={`badge ${COL_BADGE[status] || "b-gray"}`}>
-                  {status}
-                </span>
-                <div className={`av ${avOf(t.assignee_id)} av-sm`}>
-                  {nameOf(t.assignee_id)[0]}
-                </div>
-                <div
-                  className={`lrow-due ${danger ? "due-red" : warn ? "due-amber" : "due-soft"}`}
-                >
-                  {dd.label ? (
-                    <>
-                      {dd.label}
-                      {dd.timeLabel && ` ${dd.timeLabel}`}
-                      {dd.dDay && (
-                        <span style={{ fontWeight: 700, marginLeft: 5 }}>
-                          {dd.dDay}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    "기한 없음"
-                  )}
-                </div>
-                <span className="tc-diff">
-                  {"★".repeat(t.difficulty ?? 1)}
-                  <span className="tc-diff-off">
-                    {"★".repeat(3 - (t.difficulty ?? 1))}
+                  <div
+                    className={`t-check ${status === "완료" ? "done" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (canEdit(t)) toggleList(t);
+                    }}
+                  >
+                    <i className="ti ti-check" />
+                  </div>
+                  <div
+                    className={`lrow-title ${status === "완료" ? "done" : ""}`}
+                  >
+                    {t.description}
+                  </div>
+                  <span className={`badge ${COL_BADGE[status] || "b-gray"}`}>
+                    {status}
                   </span>
-                </span>
-              </div>
+                  <div className={`av ${avOf(t.assignee_id)} av-sm`}>
+                    {nameOf(t.assignee_id)[0]}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-end",
+                      gap: 2,
+                      minWidth: 140,
+                    }}
+                  >
+                    <div
+                      className={`lrow-due ${danger ? "due-red" : warn ? "due-amber" : "due-soft"}`}
+                    >
+                      {dd.label ? (
+                        <>
+                          {dd.label}
+                          {dd.timeLabel && ` ${dd.timeLabel}`}
+                          {dd.dDay && (
+                            <span style={{ fontWeight: 700, marginLeft: 5 }}>
+                              {dd.dDay}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        "기한 없음"
+                      )}
+                    </div>
+                    {status === "완료" && t.completed_at && (
+                      <div
+                        className="lrow-due"
+                        style={{ color: "var(--green)" }}
+                      >
+                        <i className="ti ti-check" style={{ marginRight: 3 }} />
+                        {fmtCompleted(t.completed_at)} 완료
+                      </div>
+                    )}
+                  </div>
+                  <span className="tc-diff">
+                    {"★".repeat(t.difficulty ?? 1)}
+                    <span className="tc-diff-off">
+                      {"★".repeat(3 - (t.difficulty ?? 1))}
+                    </span>
+                  </span>
+                </div>
                 {renderExtension(t)}
               </div>
             );
@@ -770,6 +946,7 @@ export default function TasksPage() {
                   className="input"
                   type="date"
                   style={{ flex: 2 }}
+                  min={new Date().toLocaleDateString("sv-SE")}
                   value={newDue}
                   onChange={(e) => setNewDue(e.target.value)}
                 />
@@ -942,6 +1119,133 @@ export default function TasksPage() {
         />
       )}
 
+      {/* 완료 → 다른 상태 변경 경고 모달 */}
+      {statusChangePending && (
+        <ConfirmModal
+          title="완료 상태 변경"
+          message={
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 14,
+                textAlign: "center",
+                padding: "4px 0 8px",
+              }}
+            >
+              <div
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: "50%",
+                  background: "rgba(240,193,79,.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <i
+                  className="ti ti-alert-triangle"
+                  style={{ fontSize: 26, color: "var(--amber, #b8860b)" }}
+                />
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.7,
+                  color: "var(--text-main)",
+                }}
+              >
+                완료 처리된 태스크를{" "}
+                <strong>{statusChangePending.newStatus}</strong>으로 변경하면
+                <br />
+                <strong style={{ color: "var(--amber, #b8860b)" }}>
+                  완료 날짜가 초기화
+                </strong>
+                됩니다.
+              </div>
+            </div>
+          }
+          confirmLabel="변경"
+          onConfirm={() => {
+            void changeStatus(
+              statusChangePending.task,
+              statusChangePending.newStatus,
+            );
+            setStatusChangePending(null);
+          }}
+          onClose={() => setStatusChangePending(null)}
+        />
+      )}
+
+      {/* 카카오 공유 미리보기 모달 */}
+      {shareBatches.length > 0 && (
+        <Modal
+          title={`카카오 공유 ${shareBatchIdx + 1}/${shareBatches.length}`}
+          onClose={() => setShareBatches([])}
+          actions={
+            <>
+              <button className="btn" onClick={() => setShareBatches([])}>
+                취소
+              </button>
+              <button className="btn btn-primary" onClick={sendCurrentBatch}>
+                <i className="ti ti-brand-kakao" /> {shareBatchIdx + 1}/
+                {shareBatches.length} 보내기
+              </button>
+            </>
+          }
+        >
+          <div className="modal-sub">아래 내용이 카카오톡으로 공유됩니다.</div>
+          {shareBatches[shareBatchIdx].map((item, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 0",
+                borderBottom: "1px solid var(--border-2)",
+              }}
+            >
+              <img
+                src={item.img}
+                alt=""
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {item.title}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-soft)",
+                    marginTop: 2,
+                  }}
+                >
+                  {item.desc}
+                </div>
+              </div>
+            </div>
+          ))}
+        </Modal>
+      )}
+
       {/* 기한 연장 요청 모달 */}
       {extTarget && (
         <Modal
@@ -962,9 +1266,7 @@ export default function TasksPage() {
             </>
           }
         >
-          <div className="modal-sub">
-            팀장이 수락하면 기한이 변경됩니다.
-          </div>
+          <div className="modal-sub">팀장이 수락하면 기한이 변경됩니다.</div>
           <div className="field">
             <label className="field-label">희망 기한</label>
             <input

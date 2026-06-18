@@ -319,7 +319,9 @@ export default function HomePage() {
     }
   }
 
-  const unreadCount = notis.filter((n) => !n.read).length;
+  const visibleNotis = notis.filter((n) => n.type !== "meeting_soon");
+  const unreadCount = visibleNotis.filter((n) => !n.read).length;
+  const alertCount = todos.length + unreadCount;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
@@ -337,19 +339,68 @@ export default function HomePage() {
           </button>
           <div className="noti-wrap" ref={notiRef}>
             <button className="tn-icon" onClick={() => setNotiOpen((v) => !v)}>
-              {unreadCount > 0 && <span className="dot" />}
+              {alertCount > 0 && <span className="dot" />}
               <i className="ti ti-bell" />
             </button>
             {notiOpen && (
               <div className="noti-dropdown">
                 <div className="nd-head">
                   알림
-                  {unreadCount > 0 && (
-                    <span className="nd-badge">{unreadCount}</span>
+                  {alertCount > 0 && (
+                    <span className="nd-badge">{alertCount}</span>
                   )}
                 </div>
                 <div className="nd-divider" />
-                {notis.length === 0 && (
+                {todos.length > 0 && (
+                  <>
+                    {todos.map((item, i) => (
+                      <div
+                        key={i}
+                        className="nd-item"
+                        style={{ cursor: "pointer" }}
+                        onClick={() => {
+                          setNotiOpen(false);
+                          navigate(
+                            `/dashboard/${item.team_id}/${item.type === "extension" ? "tasks" : "meeting"}`,
+                          );
+                        }}
+                      >
+                        <div
+                          className="nd-icon"
+                          style={{
+                            background:
+                              item.type === "extension"
+                                ? "var(--amber)22"
+                                : "var(--blue)22",
+                            color:
+                              item.type === "extension"
+                                ? "var(--amber)"
+                                : "var(--blue)",
+                          }}
+                        >
+                          <i
+                            className={
+                              item.type === "extension"
+                                ? "ti ti-clock-edit"
+                                : "ti ti-user-check"
+                            }
+                          />
+                        </div>
+                        <div className="nd-body">
+                          <div className="nd-text">{item.label}</div>
+                          <div className="nd-time">
+                            {item.team_name} ·{" "}
+                            {item.type === "extension"
+                              ? "기한 연장 요청"
+                              : "결석 사유 동의"}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="nd-divider" />
+                  </>
+                )}
+                {visibleNotis.length === 0 && todos.length === 0 && (
                   <div
                     style={{
                       padding: "16px 14px",
@@ -360,7 +411,7 @@ export default function HomePage() {
                     새 알림이 없습니다.
                   </div>
                 )}
-                {notis.slice(0, 8).map((n) => {
+                {visibleNotis.slice(0, 8).map((n) => {
                   const st = NOTI_STYLE[n.type] ?? {
                     icon: "ti ti-bell",
                     color: "var(--text-soft)",
@@ -674,38 +725,6 @@ export default function HomePage() {
                     );
                   })
                 )}
-              </div>
-            </Card>
-
-            <Card icon="ti ti-activity" title="최근 활동">
-              <div style={{ padding: "2px 14px 12px" }}>
-                {notis.length === 0 && (
-                  <div
-                    style={{
-                      padding: "14px 0",
-                      fontSize: 12.5,
-                      color: "var(--text-soft)",
-                    }}
-                  >
-                    아직 활동 기록이 없습니다.
-                  </div>
-                )}
-                {notis.slice(0, 4).map((n) => {
-                  const st = NOTI_STYLE[n.type] ?? {
-                    icon: "ti ti-bell",
-                    color: "var(--text-soft)",
-                  };
-                  return (
-                    <div key={n.id} className="activity-row">
-                      <div
-                        className="act-dot"
-                        style={{ background: st.color }}
-                      />
-                      <div className="act-body">{n.title}</div>
-                      <div className="act-time">{relTime(n.created_at)}</div>
-                    </div>
-                  );
-                })}
               </div>
             </Card>
 

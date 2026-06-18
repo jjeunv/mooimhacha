@@ -33,10 +33,18 @@ export class ActionItemsService {
     return this.actionRepo.save(action);
   }
 
-  async list(userId: number, teamId: number, assigneeId?: number) {
+  async list(
+    userId: number,
+    teamId: number,
+    assigneeId?: number,
+    meetingId?: number,
+    confirmed?: boolean,
+  ) {
     await this.teamsService.requireMembership(userId, teamId);
     const where: FindOptionsWhere<ActionItem> = { team_id: teamId };
     if (assigneeId) where.assignee_id = assigneeId;
+    if (meetingId !== undefined) where.meeting_id = meetingId;
+    if (confirmed !== undefined) where.confirmed = confirmed;
     return this.actionRepo.find({
       where,
       order: { due_date: 'ASC', created_at: 'ASC' },
