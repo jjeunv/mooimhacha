@@ -840,7 +840,7 @@ export default function MeetingPage() {
                       <i className="ti ti-player-play" /> 회의 시작
                     </button>
                   )}
-                  {selected.status === "active" && (
+                  {selected.status === "active" && hasJoined === true && (
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => void endMeeting()}
@@ -849,29 +849,15 @@ export default function MeetingPage() {
                       <i className="ti ti-player-stop" /> 회의 종료
                     </button>
                   )}
-                  {selected.status === "active" && hasJoined === false && (
+                  {selected.status === "active" && hasJoined !== true && (
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => void attendMeeting()}
-                      disabled={joiningMeeting}
+                      disabled={joiningMeeting || hasJoined === null}
                     >
                       <i className="ti ti-login" />{" "}
                       {joiningMeeting ? "참가 중…" : "회의 참여"}
                     </button>
-                  )}
-                  {selected.status === "active" && hasJoined === true && (
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "var(--green)",
-                        fontWeight: 600,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      <i className="ti ti-check" /> 참가 완료
-                    </span>
                   )}
                 </div>
                 <div className="mdh-meta">
