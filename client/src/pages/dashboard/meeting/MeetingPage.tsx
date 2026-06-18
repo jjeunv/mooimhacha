@@ -1534,6 +1534,7 @@ export default function MeetingPage() {
               <input
                 className="input"
                 type="date"
+                min={new Date().toLocaleDateString("sv-SE")}
                 value={newDate}
                 onChange={(e) => setNewDate(e.target.value)}
               />
