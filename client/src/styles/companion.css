@@ -395,6 +395,33 @@ body {
   font-size: 12px;
   text-align: center;
 }
+/* 5분 경과 안건 안내 */
+@keyframes btn-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+.cmp-agenda-hint {
+  margin: 6px 10px 0;
+  padding: 6px 10px;
+  background: var(--coral-soft);
+  color: var(--coral);
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: center;
+}
+.cmp-agenda-item--hint {
+  border-color: #ef4444;
+  animation: btn-pulse 1.5s ease-in-out infinite;
+}
+.cmp-start-btn--pulse {
+  animation: btn-pulse 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
 /* 마이크 켜기 유도 배너 (꺼짐 상태) */
 .cmp-mic-prompt {
   margin: 6px 10px 0;

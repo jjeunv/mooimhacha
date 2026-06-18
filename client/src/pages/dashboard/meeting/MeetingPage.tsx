@@ -59,29 +59,34 @@ const ATT_BADGE: Record<
 
 const AV_GRADS = ["var(--av1)", "var(--av2)", "var(--av3)", "var(--av4)"];
 
-function meetingMeta(m: Meeting, memberCount: number): string {
+function meetingMeta(
+  m: Meeting,
+  memberCount: number,
+  attendedCount?: number,
+): string {
   const d = new Date(m.scheduled_at);
   const today = new Date();
   const day =
     d.toDateString() === today.toDateString()
       ? "오늘"
       : `${d.getMonth() + 1}월 ${d.getDate()}일`;
-  const time = d.toLocaleTimeString("ko-KR", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
   if (m.status === "ended" && m.t0_timestamp && m.ended_at) {
     const start = new Date(m.t0_timestamp);
     const end = new Date(m.ended_at);
-    const fmt = (d: Date) =>
-      `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+    const timeFmt = (t: Date) =>
+      t.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+    const startDay =
+      start.toDateString() === today.toDateString()
+        ? "오늘"
+        : `${start.getMonth() + 1}월 ${start.getDate()}일`;
     const sameDay = start.toDateString() === end.toDateString();
     const endStr = sameDay
-      ? end.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
-      : fmt(end);
-    return `${fmt(start)} ~ ${endStr}`;
+      ? timeFmt(end)
+      : `${end.getMonth() + 1}/${end.getDate()} ${timeFmt(end)}`;
+    const countStr = attendedCount !== undefined ? ` · ${attendedCount}명` : "";
+    return `${startDay} · ${timeFmt(start)} ~ ${endStr}${countStr}`;
   }
-  return `${day} ${time} · ${memberCount}명`;
+  return `${day} · ${memberCount}명`;
 }
 
 export default function MeetingPage() {
@@ -97,6 +102,9 @@ export default function MeetingPage() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [attendance, setAttendance] = useState<MeetingAttendance | null>(null);
   const [teamSettings, setTeamSettings] = useState<TeamSettings | null>(null);
+  const [hasJoined, setHasJoined] = useState<boolean | null>(null);
+  const [joinedCount, setJoinedCount] = useState(0);
+  const [joiningMeeting, setJoiningMeeting] = useState(false);
   const [absenceInput, setAbsenceInput] = useState("");
   const [absenceSubmitted, setAbsenceSubmitted] = useState(false);
   // 회의별 출결 요약 (목록 배지·미처리 표시용)
@@ -306,6 +314,20 @@ export default function MeetingPage() {
       }
     }
   }, [tab, selectedId, selected?.status, loadAttendance]);
+
+  useEffect(() => {
+    setHasJoined(null);
+    setJoinedCount(0);
+    if (!selectedId || selected?.status === "ended") return;
+    void apiGet<{ count: number; hasJoined: boolean }>(
+      `/meetings/${selectedId}/joined-count`,
+    )
+      .then(({ count, hasJoined: hj }) => {
+        setJoinedCount(count);
+        setHasJoined(hj);
+      })
+      .catch(() => null);
+  }, [selectedId, selected?.status]);
 
   useEffect(() => {
     if (
@@ -649,6 +671,26 @@ export default function MeetingPage() {
     }
   }
 
+  async function attendMeeting() {
+    if (!selected || joiningMeeting) return;
+    setJoiningMeeting(true);
+    try {
+      const res = await apiPost<{ ok: true; alreadyJoined: boolean }>(
+        `/meetings/${selected.id}/attend`,
+        {},
+      );
+      setHasJoined(true);
+      if (!res.alreadyJoined) {
+        setJoinedCount((c) => c + 1);
+        showToast("참가 완료!");
+      }
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setJoiningMeeting(false);
+    }
+  }
+
   // status → CSS 클래스/레이블 매핑. as const로 유니온 키 타입 접근 보장.
   const spillCls = {
     active: "spill-live",
@@ -688,10 +730,6 @@ export default function MeetingPage() {
   const lowSpeaker = speak.find(
     (s) => s.speech_ratio != null && s.speech_ratio < 0.1,
   );
-  const headMeta = selected
-    ? meetingMeta(selected, team?.member_count ?? 0)
-    : "";
-
   return (
     <>
       <div className="meeting-layout">
@@ -755,7 +793,11 @@ export default function MeetingPage() {
                             </span>
                           </div>
                           <div className="mcard-meta">
-                            {meetingMeta(m, team?.member_count ?? 0)}
+                            {meetingMeta(
+                              m,
+                              team?.member_count ?? 0,
+                              summaries.get(m.id)?.attended_count,
+                            )}
                           </div>
                         </div>
                       );
@@ -778,8 +820,22 @@ export default function MeetingPage() {
             <>
               <div className="mdetail-head">
                 <div className="mdh-top">
-                  <div className="mdh-title">
-                    {selected.topic ?? "제목 없는 회의"}
+                  <div className="mdh-top-left">
+                    <div className="mdh-title">
+                      {selected.topic ?? "제목 없는 회의"}
+                    </div>
+                    <div className="mdh-badges">
+                      <span className={`spill ${spillCls[selected.status]}`}>
+                        {spillLabel[selected.status]}
+                      </span>
+                      <span
+                        className={`mdh-type-badge mdh-type-${selected.meeting_type}`}
+                      >
+                        {selected.meeting_type === "regular"
+                          ? "전체 회의"
+                          : "부분 회의"}
+                      </span>
+                    </div>
                   </div>
                   {selected.status === "scheduled" && (
                     <button
@@ -790,7 +846,7 @@ export default function MeetingPage() {
                       <i className="ti ti-player-play" /> 회의 시작
                     </button>
                   )}
-                  {selected.status === "active" && (
+                  {selected.status === "active" && hasJoined === true && (
                     <button
                       className="btn btn-danger btn-sm"
                       onClick={() => void endMeeting()}
@@ -799,14 +855,72 @@ export default function MeetingPage() {
                       <i className="ti ti-player-stop" /> 회의 종료
                     </button>
                   )}
+                  {selected.status === "active" && hasJoined !== true && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void attendMeeting()}
+                      disabled={joiningMeeting || hasJoined === null}
+                    >
+                      <i className="ti ti-login" />{" "}
+                      {joiningMeeting ? "참가 중…" : "회의 참여"}
+                    </button>
+                  )}
                 </div>
                 <div className="mdh-meta">
-                  <span>
-                    <i className="ti ti-calendar" /> {headMeta}
-                  </span>
-                  <span>
-                    <i className="ti ti-users" /> {team?.member_count ?? "-"}명
-                  </span>
+                  <div className="mdh-meta-dates">
+                    <i className="ti ti-calendar" />
+                    <span>
+                      {(() => {
+                        const d = new Date(selected.scheduled_at);
+                        const today = new Date();
+                        const day =
+                          d.toDateString() === today.toDateString()
+                            ? "오늘"
+                            : `${d.getMonth() + 1}월 ${d.getDate()}일`;
+                        const t = d.toLocaleTimeString("ko-KR", {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        });
+                        return `${day} ${t} 예정`;
+                      })()}
+                    </span>
+                    {selected.status === "ended" &&
+                      selected.t0_timestamp &&
+                      selected.ended_at && (
+                        <>
+                          <span />
+                          <span>
+                            {(() => {
+                              const tf = (d: Date) =>
+                                d.toLocaleTimeString("ko-KR", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                });
+                              const s = new Date(selected.t0_timestamp!);
+                              const e = new Date(selected.ended_at!);
+                              const today = new Date();
+                              const day =
+                                s.toDateString() === today.toDateString()
+                                  ? "오늘"
+                                  : `${s.getMonth() + 1}월 ${s.getDate()}일`;
+                              const min = Math.round(
+                                (e.getTime() - s.getTime()) / 60000,
+                              );
+                              const dur =
+                                min >= 60
+                                  ? `${Math.floor(min / 60)}시간${min % 60 ? ` ${min % 60}분` : ""}`
+                                  : `${min}분`;
+                              return `${day} ${tf(s)} ~ ${tf(e)} (${dur})`;
+                            })()}
+                          </span>
+                        </>
+                      )}
+                  </div>
+                  {selected.status !== "ended" && (
+                    <span>
+                      <i className="ti ti-users" /> {joinedCount}명
+                    </span>
+                  )}
                   {selected.status === "active" && (
                     <span style={{ color: "var(--coral)", fontWeight: 700 }}>
                       <i className="ti ti-clock" /> {fmt(elapsed)}
@@ -1019,63 +1133,73 @@ export default function MeetingPage() {
                             저장된 발화 기록이 없습니다.
                           </div>
                         ) : (
-                          transcript.sections
-                            .filter((s) => s.groups.length > 0)
-                            .map((section) => (
-                              <div
-                                key={section.agenda_id}
-                                className="utt-section"
-                              >
-                                <div className="utt-section-title">
-                                  {section.title}
-                                </div>
-                                {section.groups.map((g, gi) => {
-                                  const speaker = speak.find(
-                                    (s) => s.user_id === g.user_id,
-                                  );
-                                  const idx = speak.findIndex(
-                                    (s) => s.user_id === g.user_id,
-                                  );
-                                  return (
-                                    <div key={gi} className="utt-row">
-                                      <div
-                                        className={`av a${(idx % 4) + 1} av-sm`}
-                                      >
-                                        {(speaker?.name ?? "?")[0]}
-                                      </div>
-                                      <div className="utt-body">
-                                        <span className="utt-name">
-                                          {speaker?.name ??
-                                            `사용자 ${g.user_id}`}
-                                          <span className="utt-time">
-                                            {selected.t0_timestamp
-                                              ? new Date(
-                                                  new Date(
-                                                    selected.t0_timestamp,
-                                                  ).getTime() +
-                                                    g.started_at_offset_ms,
-                                                ).toLocaleTimeString("ko-KR", {
-                                                  hour: "2-digit",
-                                                  minute: "2-digit",
-                                                  second: "2-digit",
-                                                })
-                                              : fmt(
-                                                  Math.floor(
-                                                    g.started_at_offset_ms /
-                                                      1000,
-                                                  ),
-                                                )}
-                                          </span>
-                                        </span>
-                                        <span className="utt-text">
-                                          {g.text}
-                                        </span>
-                                      </div>
+                          (() => {
+                            const flat = transcript.sections
+                              .filter((s) => s.groups.length > 0)
+                              .flatMap((s) =>
+                                s.groups.map((g) => ({
+                                  ...g,
+                                  sectionId: s.agenda_id,
+                                  sectionTitle: s.title,
+                                })),
+                              )
+                              .sort(
+                                (a, b) =>
+                                  a.started_at_offset_ms -
+                                  b.started_at_offset_ms,
+                              );
+                            return flat.map((g, i) => {
+                              const showHeader =
+                                i === 0 ||
+                                g.sectionId !== flat[i - 1].sectionId;
+                              const speaker = speak.find(
+                                (s) => s.user_id === g.user_id,
+                              );
+                              const idx = speak.findIndex(
+                                (s) => s.user_id === g.user_id,
+                              );
+                              return (
+                                <div key={i}>
+                                  {showHeader && (
+                                    <div className="utt-section-title">
+                                      {g.sectionTitle}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            ))
+                                  )}
+                                  <div className="utt-row">
+                                    <div
+                                      className={`av a${(idx % 4) + 1} av-sm`}
+                                    >
+                                      {(speaker?.name ?? "?")[0]}
+                                    </div>
+                                    <div className="utt-body">
+                                      <span className="utt-name">
+                                        {speaker?.name ?? `사용자 ${g.user_id}`}
+                                        <span className="utt-time">
+                                          {selected.t0_timestamp
+                                            ? new Date(
+                                                new Date(
+                                                  selected.t0_timestamp,
+                                                ).getTime() +
+                                                  g.started_at_offset_ms,
+                                              ).toLocaleTimeString("ko-KR", {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                                second: "2-digit",
+                                              })
+                                            : fmt(
+                                                Math.floor(
+                                                  g.started_at_offset_ms / 1000,
+                                                ),
+                                              )}
+                                        </span>
+                                      </span>
+                                      <span className="utt-text">{g.text}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()
                         )}
                       </>
                     )}
@@ -1087,20 +1211,12 @@ export default function MeetingPage() {
                   <div className="tab-panel active">
                     <div className="panel-label">
                       출결 현황
-                      {(() => {
-                        const grace =
-                          teamSettings?.punctuality_grace_ratio ?? 0.1;
-                        const totalMin = selected.total_minutes;
-                        const graceMin = Math.round(totalMin * grace);
-                        return (
-                          <span
-                            className="info-tip"
-                            data-tip={`회의 시작 후 ${graceMin}분(총 ${totalMin}분의 ${Math.round(grace * 100)}%) 이내 입장 → 출석\n초과 입장 → 지각\n입장 기록 없음 → 결석`}
-                          >
-                            <i className="ti ti-info-circle" />
-                          </span>
-                        );
-                      })()}
+                      <span
+                        className="info-tip"
+                        data-tip={`회의 시작 후 5분 이내 입장 → 출석\n5분 초과 입장 → 지각\n입장 기록 없음 → 결석`}
+                      >
+                        <i className="ti ti-info-circle" />
+                      </span>
                     </div>
                     {selected.status !== "ended" ? (
                       <div className="summary-box">
@@ -1140,7 +1256,7 @@ export default function MeetingPage() {
                                   {badge.label}
                                   {mem.status === "late" &&
                                     mem.late_minutes != null &&
-                                    ` ${mem.late_minutes}분`}
+                                    ` +${mem.late_minutes}분 후 입장`}
                                 </span>
                               </div>
                               {/* 서브 행: 사유 + 액션 (결석·출석인정만) */}
@@ -1300,117 +1416,25 @@ export default function MeetingPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="summary-section">
-                          <div className="summary-header">
-                            <div className="summary-title">
-                              <i className="ti ti-sparkles" />
-                              AI 회의록
-                            </div>
-                            <button
-                              className="btn btn-sm"
-                              disabled={busy}
-                              onClick={async () => {
-                                setBusy(true);
-                                try {
-                                  const res = await apiPost<{
-                                    summarized: boolean;
-                                    reason?: string;
-                                  }>(`/meetings/${selectedId}/summarize`);
-                                  if (!res.summarized) {
-                                    showToast(
-                                      res.reason === "llm_not_configured"
-                                        ? "API 키가 설정되지 않았습니다."
-                                        : "요약에 실패했어요. 다시 시도해 주세요.",
-                                      "error",
-                                    );
-                                  } else {
-                                    await loadMeetings();
-                                    await loadPendingTasks();
-                                    showToast("회의가 요약됐습니다.");
-                                  }
-                                } catch (e) {
-                                  showToast((e as Error).message, "error");
-                                } finally {
-                                  setBusy(false);
-                                }
-                              }}
-                            >
-                              <i
-                                className={`ti ${busy ? "ti-loader-2" : "ti-refresh"}`}
-                              />
-                              {busy
-                                ? "요약 중…"
-                                : selected.summary
-                                  ? "다시 요약"
-                                  : "요약 생성"}
-                            </button>
-                          </div>
-                          {selected.summary ? (
-                            <div className="summary-md">
-                              <ReactMarkdown>{selected.summary}</ReactMarkdown>
-                            </div>
-                          ) : (
-                            <div className="summary-empty">
-                              <i className="ti ti-file-description" />
-                              <span>
-                                발화 기록과 결정 사항을 바탕으로 AI가 회의록을
-                                작성합니다.
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
                         {pendingTasks.length > 0 && (
-                          <div
-                            className="summary-section"
-                            style={{ marginTop: 16 }}
-                          >
+                          <div className="summary-section summary-section--tasks">
                             <div className="summary-header">
-                              <div className="summary-title">
+                              <div className="summary-title summary-title--amber">
                                 <i className="ti ti-list-check" />
                                 AI 제안 태스크
-                                <span
-                                  className="badge"
-                                  style={{
-                                    marginLeft: 6,
-                                    background:
-                                      "var(--amber-soft, rgba(240,193,79,.18))",
-                                    color: "var(--amber, #b8860b)",
-                                  }}
-                                >
+                                <span className="badge badge-amber">
                                   {pendingTasks.length}개 검토 대기
                                 </span>
                               </div>
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 8,
-                                padding: "4px 0 8px",
-                              }}
-                            >
+                            <div className="summary-tasks">
                               {pendingTasks.map((task) => (
                                 <div
                                   key={task.id}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 10,
-                                    padding: "10px 14px",
-                                    background: "var(--surface-2)",
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                  }}
+                                  className="summary-task-item"
                                 >
-                                  <i
-                                    className="ti ti-sparkles"
-                                    style={{
-                                      color: "var(--amber, #b8860b)",
-                                      flexShrink: 0,
-                                    }}
-                                  />
-                                  <span style={{ flex: 1 }}>
+                                  <i className="ti ti-sparkles" />
+                                  <span className="summary-task-desc">
                                     {task.description}
                                   </span>
                                   <button
@@ -1456,6 +1480,70 @@ export default function MeetingPage() {
                             </div>
                           </div>
                         )}
+                        <div className="summary-section">
+                          <div className="summary-header">
+                            <div className="summary-title">
+                              <i className="ti ti-sparkles" />
+                              AI 회의록
+                            </div>
+                            <button
+                              className="btn btn-sm"
+                              disabled={busy}
+                              onClick={async () => {
+                                setBusy(true);
+                                try {
+                                  const res = await apiPost<{
+                                    summarized: boolean;
+                                    reason?: string;
+                                  }>(`/meetings/${selectedId}/summarize`);
+                                  if (!res.summarized) {
+                                    showToast(
+                                      res.reason === "llm_not_configured"
+                                        ? "API 키가 설정되지 않았습니다."
+                                        : "요약에 실패했어요. 다시 시도해 주세요.",
+                                      "error",
+                                    );
+                                  } else {
+                                    await loadMeetings();
+                                    await loadPendingTasks();
+                                    showToast("회의가 요약됐습니다.");
+                                  }
+                                } catch (e) {
+                                  showToast((e as Error).message, "error");
+                                } finally {
+                                  setBusy(false);
+                                }
+                              }}
+                            >
+                              <i
+                                className={`ti ${busy ? "ti-loader-2" : "ti-refresh"}`}
+                              />
+                              {busy
+                                ? "요약 중…"
+                                : selected.summary
+                                  ? "다시 요약"
+                                  : "요약 생성"}
+                            </button>
+                          </div>
+                          {selected.one_liner && (
+                            <div className="summary-one-liner">
+                              {selected.one_liner}
+                            </div>
+                          )}
+                          {selected.summary ? (
+                            <div className="summary-md">
+                              <ReactMarkdown>{selected.summary}</ReactMarkdown>
+                            </div>
+                          ) : (
+                            <div className="summary-empty">
+                              <i className="ti ti-file-description" />
+                              <span>
+                                발화 기록과 결정 사항을 바탕으로 AI가 회의록을
+                                작성합니다.
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>

@@ -661,6 +661,14 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
             : "🔌 연결이 끊겨 다시 접속하는 중이에요…"}
         </div>
       )}
+      {elapsedSec >= 300 && agendas.every((a) => a.status === "pending") && (
+        <div className="cmp-agenda-hint">
+          💡 회의 시작 5분이 지났어요.{" "}
+          {agendas.length === 0
+            ? "안건을 추가해 보세요!"
+            : "안건을 시작해 보세요!"}
+        </div>
+      )}
       {wsIssue && (
         <div className="cmp-mic-banner" role="alert">
           <span>{wsIssue}</span>
@@ -716,6 +724,9 @@ export default function MeetingRoom({ meetingId, teamId }: Props) {
         onActivate={handleActivate}
         onDone={handleDone}
         onAdd={handleAddAgenda}
+        hintActive={
+          elapsedSec >= 300 && agendas.every((a) => a.status === "pending")
+        }
       />
 
       <ContributionBar

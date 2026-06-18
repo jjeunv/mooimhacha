@@ -12,6 +12,7 @@ interface Props {
   onActivate: (id: number) => void;
   onDone: (id: number) => void;
   onAdd: (title: string) => void;
+  hintActive?: boolean;
 }
 
 function stageClass(ratio: number): string {
@@ -34,6 +35,7 @@ export default function AgendaTracker({
   onActivate,
   onDone,
   onAdd,
+  hintActive,
 }: Props) {
   const [newTitle, setNewTitle] = useState("");
   const [openSummary, setOpenSummary] = useState<number | null>(null);
@@ -72,7 +74,7 @@ export default function AgendaTracker({
               key={a.id}
               className={`cmp-agenda-item cmp-agenda-item--${a.status} ${
                 isActive ? stageClass(ratio) : ""
-              }`}
+              } ${hintActive && a.status === "pending" ? "cmp-agenda-item--hint" : ""}`}
             >
               <div className="cmp-agenda-row">
                 <span className={`cmp-dot cmp-dot--${a.status}`} />
@@ -147,7 +149,16 @@ export default function AgendaTracker({
           onChange={(e) => setNewTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submitNew()}
         />
-        <button onClick={submitNew}>+</button>
+        <button
+          className={
+            hintActive && agendas.length === 0
+              ? "cmp-start-btn--pulse"
+              : undefined
+          }
+          onClick={submitNew}
+        >
+          +
+        </button>
       </div>
     </section>
   );

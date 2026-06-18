@@ -27,6 +27,7 @@ export interface Meeting {
   t0_timestamp: string | null;
   ended_at: string | null;
   meeting_type: string;
+  one_liner?: string | null;
   summary?: string | null;
 }
 
@@ -117,6 +118,7 @@ export interface AttendanceMember {
   name: string;
   profile_image_url: string | null;
   status: AttendanceStatus;
+  joined_at: string | null;
   late_minutes: number | null;
   absence: {
     id: number;
@@ -138,6 +140,7 @@ export interface AttendanceSummary {
   meeting_id: number;
   my_status: AttendanceStatus;
   pending_count: number;
+  attended_count: number;
 }
 
 export interface PendingConsent {

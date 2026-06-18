@@ -41,6 +41,7 @@ export class LlmService {
 
   // 회의 종합 정리 — 회의 요약·누락된 결정·정리된 태스크 (각 항목 출처 utterance_id 포함)
   async summarizeMeeting(context: string): Promise<{
+    one_liner: string;
     summary: string;
     missed_decisions: { content: string; source_utterance_id: number | null }[];
     tasks: {
@@ -52,8 +53,9 @@ export class LlmService {
     const prompt =
       '아래 회의 자료(안건별 요약·회의록·수동 입력된 결정·액션)를 바탕으로 회의를 종합 정리해라.\n' +
       '반드시 아래 JSON 형식만 출력한다.\n' +
+      'one_liner 필드는 이 회의를 한두 문장으로 핵심만 요약한 한국어 문장이다 (최대 100자).\n' +
       'summary 필드는 마크다운 형식의 상세 회의록으로 작성한다 — ## 제목, ### 안건, **굵게**, 불릿 리스트 등을 활용해 회의 전체 내용을 빠짐없이 정리한다.\n' +
-      '{"summary": string, ' +
+      '{"one_liner": string, "summary": string, ' +
       '"missed_decisions": [{"content": string, "source_utterance_id": number|null}], ' +
       '"tasks": [{"description": string, "assignee_hint": string|null, "source_utterance_id": number|null}]}\n\n' +
       context;
@@ -80,6 +82,7 @@ export class LlmService {
   // LLM 응답 구조 검증 — 필드 존재·타입 불일치 시 null(기능 실패 처리),
   // 항목 단위 불량은 걸러내고 배열 길이는 환각 방어 상한으로 절단.
   private validateMeetingSummary(parsed: unknown): {
+    one_liner: string;
     summary: string;
     missed_decisions: { content: string; source_utterance_id: number | null }[];
     tasks: {
@@ -119,7 +122,11 @@ export class LlmService {
           typeof t.assignee_hint === 'string' ? t.assignee_hint : null,
         source_utterance_id: asId(t.source_utterance_id),
       }));
-    return { summary: obj.summary, missed_decisions, tasks };
+    const one_liner =
+      typeof obj.one_liner === 'string'
+        ? obj.one_liner
+        : obj.summary.split('\n')[0].replace(/^#+\s*/, '');
+    return { one_liner, summary: obj.summary, missed_decisions, tasks };
   }
 
   // 다음 회의 안건 목록 생성 (출력: JSON 문자열)
@@ -164,17 +171,18 @@ export class LlmService {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.config.get<string>('GROQ_API_KEY')}`,
           },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-          temperature: 0.3,
-          max_tokens: MAX_OUTPUT_TOKENS,
-        }),
-        signal: controller.signal,
-      });
+          body: JSON.stringify({
+            model: this.model,
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+            temperature: 0.3,
+            max_tokens: MAX_OUTPUT_TOKENS,
+          }),
+          signal: controller.signal,
+        },
+      );
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         this.logger.error(`Groq 응답 오류: ${res.status} — ${body}`);

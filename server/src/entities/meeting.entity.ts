@@ -50,6 +50,9 @@ export class Meeting {
   is_invalidated!: boolean;
 
   // 회의 후 AI 종합 정리로 생성
+  @Column({ type: 'varchar', length: 400, nullable: true })
+  one_liner!: string | null;
+
   @Column({ type: 'text', nullable: true })
   summary!: string | null;
 
