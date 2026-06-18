@@ -861,6 +861,13 @@ export default function MeetingPage() {
                           ? "전체 회의"
                           : "부분 회의"}
                       </span>
+                      {selected.status === "ended" &&
+                        summaries.get(selected.id)?.attended_count != null && (
+                          <span className="mdh-attended-count">
+                            <i className="ti ti-user" />
+                            {summaries.get(selected.id)!.attended_count}명
+                          </span>
+                        )}
                     </div>
                   </div>
                   <div
