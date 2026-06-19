@@ -1384,13 +1384,21 @@
   margin-left: auto;
 }
 .tc-ext-ok,
-.tc-ext-no {
+.tc-ext-no,
+.tc-ext-reason-btn {
   border: 0;
   border-radius: 6px;
   padding: 3px 9px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+}
+.tc-ext-reason-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-soft);
+  color: var(--text-soft);
 }
 .tc-ext-ok {
   background: var(--green-soft);

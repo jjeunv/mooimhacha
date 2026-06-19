@@ -150,6 +150,7 @@ export default function TasksPage() {
   const [extDue, setExtDue] = useState("");
   const [extReason, setExtReason] = useState("");
   const [extSaving, setExtSaving] = useState(false);
+  const [viewingExt, setViewingExt] = useState<TaskExtension | null>(null);
 
   // 팀의 연장 요청 로드 — 태스크별 최신 1건만 (list는 created_at DESC)
   const loadExtensions = useCallback(async () => {
@@ -266,6 +267,16 @@ export default function TasksPage() {
           </span>
           {isLeader ? (
             <span className="tc-ext-acts">
+              <button
+                className="tc-ext-reason-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewingExt(ext);
+                }}
+                title="연장 사유 보기"
+              >
+                <i className="ti ti-message-circle" /> 사유 확인
+              </button>
               <button
                 className="tc-ext-ok"
                 onClick={() => void approveExt(ext.id)}
@@ -1332,6 +1343,42 @@ export default function TasksPage() {
               value={extReason}
               onChange={(e) => setExtReason(e.target.value)}
             />
+          </div>
+        </Modal>
+      )}
+      {viewingExt && (
+        <Modal
+          title="연장 요청 사유"
+          onClose={() => setViewingExt(null)}
+          actions={
+            <button className="btn" onClick={() => setViewingExt(null)}>
+              닫기
+            </button>
+          }
+        >
+          <div className="modal-sub">
+            {viewingExt.requester_name}님의 요청 · {viewingExt.task_description}
+          </div>
+          <div className="field">
+            <label className="field-label">희망 기한</label>
+            <div className="input" style={{ background: "var(--bg-soft)" }}>
+              {new Date(viewingExt.requested_due_date).toLocaleString(
+                "ko-KR",
+              )}
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label">사유</label>
+            <div
+              className="input"
+              style={{
+                background: "var(--bg-soft)",
+                minHeight: 72,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {viewingExt.reason || "(작성된 사유가 없습니다)"}
+            </div>
           </div>
         </Modal>
       )}

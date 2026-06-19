@@ -125,6 +125,9 @@ export default function MeetingPage() {
   const [modalOpen, setModalOpen] = useState<
     "meeting" | "decision" | "agenda" | "absence" | "headset" | null
   >(null);
+  const [headsetAction, setHeadsetAction] = useState<"start" | "attend">(
+    "start",
+  );
   // 결정 수정/삭제 대상 — 수정은 결정 모달을 재사용, 삭제는 확인 모달을 띄운다.
   const [editingDecision, setEditingDecision] = useState<Decision | null>(null);
   const [deletingDecision, setDeletingDecision] = useState<Decision | null>(
@@ -759,7 +762,7 @@ export default function MeetingPage() {
   }
 
   async function attendMeeting() {
-    if (!selected || joiningMeeting) return;
+    if (!selected || !team || joiningMeeting) return;
     setJoiningMeeting(true);
     try {
       const res = await apiPost<{ ok: true; alreadyJoined: boolean }>(
@@ -767,9 +770,17 @@ export default function MeetingPage() {
         {},
       );
       setHasJoined(true);
+      const win = openCompanion(selected.id, team.id);
+      if (!window.mooimhacha?.isElectron && win === null) {
+        showToast(
+          "참가는 완료됐지만 팝업이 차단됐어요. 회의실 탭에서 회의 창을 다시 열어주세요.",
+          "error",
+        );
+      } else if (!res.alreadyJoined) {
+        showToast("참가 완료!");
+      }
       if (!res.alreadyJoined) {
         setJoinedCount((c) => c + 1);
-        showToast("참가 완료!");
       }
     } catch (e) {
       showToast((e as Error).message, "error");
@@ -972,7 +983,10 @@ export default function MeetingPage() {
                     {selected.status === "scheduled" && (
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => setModalOpen("headset")}
+                        onClick={() => {
+                          setHeadsetAction("start");
+                          setModalOpen("headset");
+                        }}
                         disabled={busy}
                       >
                         <i className="ti ti-player-play" /> 회의 시작
@@ -990,7 +1004,10 @@ export default function MeetingPage() {
                     {selected.status === "active" && hasJoined !== true && (
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => void attendMeeting()}
+                        onClick={() => {
+                          setHeadsetAction("attend");
+                          setModalOpen("headset");
+                        }}
                         disabled={joiningMeeting || hasJoined === null}
                       >
                         <i className="ti ti-login" />{" "}
@@ -1751,6 +1768,7 @@ export default function MeetingPage() {
                         className="input"
                         type="number"
                         min={1}
+                        step={5}
                         value={editMinutes}
                         disabled={selected.status === "ended"}
                         onChange={(e) =>
@@ -1808,7 +1826,11 @@ export default function MeetingPage() {
           onClose={() => setModalOpen(null)}
           onConfirm={() => {
             setModalOpen(null);
-            void startMeeting();
+            if (headsetAction === "start") {
+              void startMeeting();
+            } else {
+              void attendMeeting();
+            }
           }}
         />
       )}
@@ -1892,6 +1914,7 @@ export default function MeetingPage() {
               className="input"
               type="number"
               min={5}
+              step={5}
               value={newMinutes}
               onChange={(e) =>
                 setNewMinutes(
@@ -1931,7 +1954,7 @@ export default function MeetingPage() {
                 value={newAgendaInput}
                 onChange={(e) => setNewAgendaInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     addAgendaToList();
                   }

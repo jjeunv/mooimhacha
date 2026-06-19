@@ -99,7 +99,7 @@ export default function QuickInput({ members, onDecision, onAction }: Props) {
               value={decision}
               placeholder="결정 사항 한 줄 + Enter"
               onChange={(e) => setDecision(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitDecision()}
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && submitDecision()}
             />
           </div>
           <div className="cmp-quick-block">
