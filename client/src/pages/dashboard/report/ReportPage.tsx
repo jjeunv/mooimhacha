@@ -6,20 +6,30 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type { ActionItem, Meeting, TeamContribution } from "@/lib/types";
 import type { TeamContext } from "../DashboardPage";
 
-const BAR_COLORS = [
-  "var(--green)",
-  "var(--blue)",
-  "var(--pink)",
-  "var(--amber)",
-];
 const AV_CLS = ["a1", "a2", "a3", "a4"];
+
+// 종합 기여 가중치 (발언 0.3 · 출석 0.2 · 태스크 0.5).
+const W_SPEECH = 0.3;
+const W_ATTEND = 0.2;
+const W_TASK = 0.5;
+const SEG_COLOR = {
+  speech: "var(--blue)",
+  attend: "var(--amber)",
+  task: "var(--green)",
+};
 
 const pct = (v: number | null | undefined): number | null =>
   v == null ? null : Math.round(v * 100);
 
+// 발언 점수 = 발언 점유율(own/total)을 1인 기대치(1/N) 대비로 환산, 100점 상한.
+// speech_avg 는 점유율 평균이라 4명 균등 시 0.25 → ×N 으로 "기준 대비 점수"가 된다.
+const speechScore = (
+  speechAvg: number | null | undefined,
+  n: number,
+): number | null =>
+  speechAvg == null ? null : Math.min(100, Math.round(speechAvg * n * 100));
+
 // SVG를 innerHTML로 직접 생성. 외부 차트 라이브러리 없이 의존성 최소화를 위한 선택.
-// getComputedStyle로 CSS 변수를 읽어 다크모드 색상을 SVG에 반영.
-// 3축(출석·참여도·태스크) 레이더. me/avg는 0~100 스케일.
 function drawRadar(svgEl: SVGSVGElement, me: number[], avg: number[]) {
   const cx = 120,
     cy = 120,
@@ -69,6 +79,76 @@ function shortDate(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+interface Chip {
+  stars: number; // 1=하 / 2=중 / 3=상
+  done: number;
+  total: number;
+}
+
+// 담당 태스크를 난이도(★)별 완료/전체로 집계
+function diffChipsOf(tasks: ActionItem[], userId: number | null): Chip[] {
+  const b: Record<number, { done: number; total: number }> = {
+    3: { done: 0, total: 0 },
+    2: { done: 0, total: 0 },
+    1: { done: 0, total: 0 },
+  };
+  for (const t of tasks) {
+    if (t.assignee_id !== userId) continue;
+    const d = t.difficulty >= 3 ? 3 : t.difficulty === 2 ? 2 : 1;
+    b[d].total++;
+    if (t.status === "done") b[d].done++;
+  }
+  return [3, 2, 1]
+    .filter((d) => b[d].total > 0)
+    .map((d) => ({ stars: d, done: b[d].done, total: b[d].total }));
+}
+
+function Swatch({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 9,
+        height: 9,
+        borderRadius: 3,
+        background: color,
+        marginRight: 4,
+        verticalAlign: "middle",
+      }}
+    />
+  );
+}
+
+// 난이도별 칩 — 완료(초록)·부분(주황)·미완(빨강)
+function DiffChip({ c }: { c: Chip }) {
+  const full = c.done === c.total;
+  const none = c.done === 0;
+  const color = none ? "var(--coral)" : full ? "var(--green)" : "var(--amber)";
+  const bg = none
+    ? "rgba(220,38,38,.10)"
+    : full
+      ? "rgba(29,158,117,.12)"
+      : "rgba(230,160,30,.16)";
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "1px 7px",
+        borderRadius: 6,
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        background: bg,
+        color,
+      }}
+    >
+      {"★".repeat(c.stars)} {c.done}/{c.total}
+    </span>
+  );
+}
+
 export default function ReportPage() {
   const team = useOutletContext<TeamContext | null>();
   const me = useCurrentUser();
@@ -102,38 +182,53 @@ export default function ReportPage() {
     };
   }, [team]);
 
-  // 종합 달성률 = 측정된 종합 점수 평균
+  // 발언 점수 환산에 쓰는 인원 수(산정 대상)
+  const n = members.length || 1;
+
+  // 종합 점수 = 발언×0.3 + 출석×0.2 + 태스크×0.5 (모든 축 0~100). 전부 미측정이면 null.
+  const scoreOf = (m: TeamContribution): number | null => {
+    const sp = speechScore(m.speech_avg, n);
+    const at = pct(m.attendance_avg);
+    const ts = pct(m.task_score);
+    if (sp == null && at == null && ts == null) return null;
+    return Math.round(
+      (sp ?? 0) * W_SPEECH + (at ?? 0) * W_ATTEND + (ts ?? 0) * W_TASK,
+    );
+  };
+
+  // 종합 달성률 = 멤버별 종합 점수 평균
   const overall = useMemo(() => {
     const vals = members
-      .map((m) => m.composite_score)
+      .map(scoreOf)
       .filter((v): v is number => v != null);
-    if (vals.length === 0) return null;
-    return Math.round((vals.reduce((a, v) => a + v, 0) / vals.length) * 100);
+    return vals.length
+      ? Math.round(vals.reduce((a, v) => a + v, 0) / vals.length)
+      : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members]);
 
-  // 레이더: 나 vs 팀 평균 (출석·참여도·태스크)
+  // 레이더: 나 vs 팀 평균 (출석·참여도(발언 점수)·태스크)
   const radar = useMemo(() => {
     if (members.length === 0) return null;
     const target =
       (me ? members.find((m) => m.user_id === me.id) : undefined) ?? members[0];
     const mine = [
       pct(target.attendance_avg) ?? 0,
-      pct(target.speech_avg) ?? 0,
+      speechScore(target.speech_avg, n) ?? 0,
       pct(target.task_score) ?? 0,
     ];
-    const avgOf = (sel: (m: TeamContribution) => number | null | undefined) => {
-      const vs = members.map(sel).filter((v): v is number => v != null);
-      return vs.length ? (vs.reduce((a, v) => a + v, 0) / vs.length) * 100 : 0;
+    const avgOf = (vals: (number | null)[]) => {
+      const v = vals.filter((x): x is number => x != null);
+      return v.length ? v.reduce((a, x) => a + x, 0) / v.length : 0;
     };
     const avg = [
-      avgOf((m) => m.attendance_avg),
-      avgOf((m) => m.speech_avg),
-      avgOf((m) => m.task_score),
+      avgOf(members.map((m) => pct(m.attendance_avg))),
+      avgOf(members.map((m) => speechScore(m.speech_avg, n))),
+      avgOf(members.map((m) => pct(m.task_score))),
     ];
     return { mine, avg, name: target.name, isMe: me?.id === target.user_id };
-  }, [members, me]);
+  }, [members, me, n]);
 
-  // 마운트 후 DOM 접근이 필요하므로 effect에서 호출
   useEffect(() => {
     const el = document.getElementById("radar") as SVGSVGElement | null;
     if (el && radar) drawRadar(el, radar.mine, radar.avg);
@@ -198,181 +293,270 @@ export default function ReportPage() {
         </div>
         <div>
           <div className="rb-score-lbl">종합 달성률</div>
-          <div className="rb-score">
-            {overall == null ? "—" : `${overall}%`}
-          </div>
+          <div className="rb-score">{overall == null ? "—" : `${overall}%`}</div>
         </div>
       </div>
 
-      {/* 팀원별 기여도 */}
-      <Card
-        icon="ti ti-chart-bar"
-        title="팀원별 기여도"
-        style={{ marginBottom: 14 }}
+      {/* 팀원별 기여도 + 레이더 (가로 2열) */}
+      <div
+        style={{
+          display: "flex",
+          gap: 14,
+          alignItems: "stretch",
+          marginBottom: 14,
+        }}
       >
-        <div style={{ padding: "0 18px 14px" }}>
-          {members.length === 0 && (
-            <div
-              style={{
-                fontSize: 12.5,
-                color: "var(--text-soft)",
-                padding: "10px 0",
-              }}
-            >
-              아직 산정된 기여도가 없습니다. 회의를 진행하면 집계돼요.
-            </div>
-          )}
-          {members.map((m, i) => {
-            const score = pct(m.composite_score);
-            const scoreCls =
-              score == null
-                ? "md"
-                : score >= 50
-                  ? "hi"
-                  : score >= 25
-                    ? "md"
-                    : "lo";
-            const myTasks = tasks.filter((t) => t.assignee_id === m.user_id);
-            const myDone = myTasks.filter((t) => t.status === "done");
-            const actionPct = myTasks.length
-              ? Math.round((myDone.length / myTasks.length) * 100)
-              : null;
-            const speech = pct(m.speech_avg);
-            const attend = pct(m.attendance_avg);
-            const barColor =
-              score != null && score < 10
-                ? "var(--coral)"
-                : BAR_COLORS[i % BAR_COLORS.length];
-            return (
-              <div key={m.user_id} className="mrc">
-                <div className="mrc-head">
-                  <div className={`av ${AV_CLS[i % 4]} av-lg`}>{m.name[0]}</div>
-                  <div>
-                    <div className="mrc-name">
-                      {m.name}{" "}
-                      {me?.id === m.user_id && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: "var(--text-soft)",
-                            fontWeight: 400,
-                          }}
-                        >
-                          나
-                        </span>
-                      )}
+        {/* 팀원별 기여도 */}
+        <Card
+          icon="ti ti-chart-bar"
+          title="팀원별 기여도"
+          style={{ flex: 1, marginBottom: 0 }}
+        >
+          {/* 게이지 범례 */}
+          <div
+            style={{
+              display: "flex",
+              gap: 16,
+              alignItems: "center",
+              flexWrap: "wrap",
+              padding: "0 18px 4px",
+              fontSize: 11.5,
+              color: "var(--text-soft)",
+            }}
+          >
+            <span>
+              <Swatch color={SEG_COLOR.speech} />발언 (×0.3)
+            </span>
+            <span>
+              <Swatch color={SEG_COLOR.attend} />출석 (×0.2)
+            </span>
+            <span>
+              <Swatch color={SEG_COLOR.task} />태스크 (×0.5)
+            </span>
+            <span style={{ marginLeft: "auto" }}>막대 = 종합 기여 합산</span>
+          </div>
+          <div
+            style={{
+              padding: "0 18px 8px",
+              fontSize: 11,
+              color: "var(--text-soft)",
+            }}
+          >
+            발언 점수 = 발언 점유율 ÷ 1인 기대치(1/{n}) (100점 상한), 태스크 =
+            난이도(★) 가중 완료율
+          </div>
+
+          <div style={{ padding: "0 18px 14px" }}>
+            {members.length === 0 && (
+              <div
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--text-soft)",
+                  padding: "10px 0",
+                }}
+              >
+                아직 산정된 기여도가 없습니다. 회의를 진행하면 집계돼요.
+              </div>
+            )}
+            {members.map((m, i) => {
+              const sScore = speechScore(m.speech_avg, n);
+              const attend = pct(m.attendance_avg);
+              const taskPct = pct(m.task_score);
+              const score = scoreOf(m);
+              const scoreCls =
+                score == null
+                  ? "md"
+                  : score >= 50
+                    ? "hi"
+                    : score >= 25
+                      ? "md"
+                      : "lo";
+              const low = score != null && score < 10;
+              const segS = (sScore ?? 0) * W_SPEECH;
+              const segA = (attend ?? 0) * W_ATTEND;
+              const segT = (taskPct ?? 0) * W_TASK;
+              const chips = diffChipsOf(tasks, m.user_id);
+              return (
+                <div key={m.user_id} className="mrc">
+                  {/* 헤더: 아바타 · 이름 · 세그먼트 게이지 · 점수 */}
+                  <div
+                    className="mrc-head"
+                    style={{ display: "flex", alignItems: "center", gap: 12 }}
+                  >
+                    <div className={`av ${AV_CLS[i % 4]} av-lg`}>
+                      {m.name[0]}
                     </div>
-                    <div className="mrc-role">
-                      {m.role === "leader" ? "팀장" : "팀원"}
-                    </div>
-                  </div>
-                  <div className={`mrc-score ${scoreCls}`}>
-                    {score == null ? "미산정" : `${score}점`}
-                    {score != null && score < 10 ? " ⚠️" : ""}
-                  </div>
-                </div>
-                <div className="mrc-stats">
-                  {[
-                    {
-                      l: "발언 비중",
-                      v: speech == null ? "—" : `${speech}%`,
-                      vc:
-                        speech != null && speech < 10
-                          ? "var(--coral)"
-                          : BAR_COLORS[i % BAR_COLORS.length],
-                    },
-                    {
-                      l: "태스크",
-                      v: myTasks.length
-                        ? `${myDone.length}/${myTasks.length}`
-                        : "—",
-                      vc:
-                        myTasks.length && myDone.length === 0
-                          ? "var(--coral)"
-                          : undefined,
-                    },
-                    { l: "출석", v: attend == null ? "—" : `${attend}%` },
-                    {
-                      l: "액션 완료",
-                      v: actionPct == null ? "—" : `${actionPct}%`,
-                      vc: actionPct === 0 ? "var(--coral)" : undefined,
-                    },
-                  ].map((s) => (
-                    <div key={s.l} className="mrc-stat">
-                      <div className="mrc-stat-l">{s.l}</div>
+                    <div style={{ width: 70, flex: "0 0 auto" }}>
                       <div
-                        className="mrc-stat-v"
-                        style={s.vc ? { color: s.vc } : undefined}
+                        className="mrc-name"
+                        style={{ display: "flex", alignItems: "center" }}
                       >
-                        {s.v}
+                        {m.name}
+                        {low && (
+                          <span
+                            className="nav-alert"
+                            title="무임승차 의심"
+                            style={{ marginLeft: 5 }}
+                          >
+                            !
+                          </span>
+                        )}
+                        {me?.id === m.user_id && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              color: "var(--text-soft)",
+                              fontWeight: 400,
+                              marginLeft: 4,
+                            }}
+                          >
+                            나
+                          </span>
+                        )}
+                      </div>
+                      <div className="mrc-role">
+                        {m.role === "leader" ? "팀장" : "팀원"}
                       </div>
                     </div>
-                  ))}
-                </div>
-                <div className="mrc-bar">
-                  <i
-                    style={{ width: `${score ?? 0}%`, background: barColor }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+                    {/* 세그먼트 게이지 (이름과 점수 사이) */}
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 11,
+                        borderRadius: 6,
+                        background: "var(--track)",
+                        overflow: "hidden",
+                        display: "flex",
+                      }}
+                      title={`발언 ${segS.toFixed(1)} + 출석 ${segA.toFixed(1)} + 태스크 ${segT.toFixed(1)}`}
+                    >
+                      <span style={{ width: `${segS}%`, background: SEG_COLOR.speech }} />
+                      <span style={{ width: `${segA}%`, background: SEG_COLOR.attend }} />
+                      <span style={{ width: `${segT}%`, background: SEG_COLOR.task }} />
+                    </div>
+                    <div
+                      className={`mrc-score ${scoreCls}`}
+                      style={{ flex: "0 0 auto" }}
+                    >
+                      {score == null ? "미산정" : `${score}점`}
+                    </div>
+                  </div>
 
-      {/* 레이더 차트 */}
-      <Card
-        icon="ti ti-chart-dots"
-        title="기여도 레이더"
-        extra={
-          <span className="card-link" style={{ cursor: "default" }}>
-            {radar
-              ? `${radar.name}${radar.isMe ? " (나)" : ""} vs 팀 평균`
-              : ""}
-          </span>
-        }
-        style={{ marginBottom: 14 }}
-      >
-        <div className="radar-wrap">
-          {radar ? (
-            <svg id="radar" width="240" height="240" viewBox="0 0 240 240" />
-          ) : (
-            <div
-              style={{ fontSize: 12.5, color: "var(--text-soft)", padding: 18 }}
-            >
-              회의를 진행하면 레이더가 채워집니다.
-            </div>
-          )}
-          <div className="radar-legend">
-            <div className="rl-item">
-              <span
-                className="rl-swatch"
-                style={{ background: "var(--green)" }}
-              />{" "}
-              {radar ? `${radar.name}${radar.isMe ? " (나)" : ""}` : "나"}
-            </div>
-            <div className="rl-item">
-              <span
-                className="rl-swatch"
-                style={{ background: "var(--text-soft)" }}
-              />{" "}
-              팀 평균
-            </div>
+                  {/* 세부: 발언(점수) · 출석 · 태스크(난이도 칩) */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                      marginTop: 9,
+                      fontSize: 12,
+                      color: "var(--text-soft)",
+                    }}
+                  >
+                    <span>
+                      발언{" "}
+                      <b
+                        style={{
+                          color:
+                            sScore != null && sScore < 50
+                              ? "var(--coral)"
+                              : "var(--text-main)",
+                        }}
+                      >
+                        {sScore == null ? "—" : `${sScore}점`}
+                      </b>
+                    </span>
+                    <span>
+                      출석{" "}
+                      <b style={{ color: "var(--text-main)" }}>
+                        {attend == null ? "—" : `${attend}%`}
+                      </b>
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      태스크
+                      {chips.length === 0 ? (
+                        <span style={{ fontSize: 11 }}>—</span>
+                      ) : (
+                        chips.map((c, ci) => <DiffChip key={ci} c={c} />)
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* 기여도 레이더 (옆 카드와 높이 맞춤) */}
+        <Card
+          icon="ti ti-chart-dots"
+          title="기여도 레이더"
+          extra={
+            <span className="card-link" style={{ cursor: "default" }}>
+              {radar
+                ? `${radar.name}${radar.isMe ? " (나)" : ""} vs 팀 평균`
+                : ""}
+            </span>
+          }
+          style={{
+            width: 360,
+            flex: "0 0 auto",
+            marginBottom: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              padding: "4px 0 10px",
+            }}
+          >
+            {radar ? (
+              <svg id="radar" width={280} height={280} viewBox="0 0 240 240" />
+            ) : (
+              <div
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--text-soft)",
+                  padding: 18,
+                }}
+              >
+                회의를 진행하면 레이더가 채워집니다.
+              </div>
+            )}
             <div
               style={{
+                display: "flex",
+                gap: 14,
                 fontSize: 11,
                 color: "var(--text-soft)",
-                lineHeight: 1.7,
-                marginTop: 4,
               }}
             >
-              출석 · 참여도(발언) · 태스크
-              <br />
-              3개 축 기준 정규화 점수
+              <span>
+                <Swatch color="var(--green)" />
+                {radar ? `${radar.name}${radar.isMe ? " (나)" : ""}` : "나"}
+              </span>
+              <span>
+                <Swatch color="var(--text-soft)" />팀 평균
+              </span>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* 회의별 요약 */}
       <Card icon="ti ti-calendar" title="회의별 요약">
