@@ -123,9 +123,9 @@ export default function MeetingPage() {
   const [decInput, setDecInput] = useState("");
   // 세 모달을 하나의 state로 관리. null이면 모두 닫힘.
   const [modalOpen, setModalOpen] = useState<
-    "meeting" | "decision" | "agenda" | "absence" | "headset" | null
+    "meeting" | "decision" | "agenda" | "absence" | "headset" | "quickstart" | null
   >(null);
-  const [headsetAction, setHeadsetAction] = useState<"start" | "attend">(
+  const [headsetAction, setHeadsetAction] = useState<"start" | "attend" | "quickstart">(
     "start",
   );
   // 결정 수정/삭제 대상 — 수정은 결정 모달을 재사용, 삭제는 확인 모달을 띄운다.
@@ -176,6 +176,19 @@ export default function MeetingPage() {
   >([]);
   const [newAgendaInput, setNewAgendaInput] = useState("");
   const [newAgendaMinutes, setNewAgendaMinutes] = useState<number | "">("");
+  const [quickTopic, setQuickTopic] = useState("");
+  const [quickMeetingType, setQuickMeetingType] = useState<"regular" | "partial">(
+    "regular",
+  );
+  const [quickMinutes, setQuickMinutes] = useState<number | "">(30);
+  const [quickAgendaList, setQuickAgendaList] = useState<
+    { title: string; minutes: number | "" }[]
+  >([]);
+  const [quickAgendaInput, setQuickAgendaInput] = useState("");
+  const [quickAgendaMinutes, setQuickAgendaMinutes] = useState<number | "">(
+    "",
+  );
+  const [quickStarting, setQuickStarting] = useState(false);
 
   // 아젠다 모달 입력값
   const [agTitle, setAgTitle] = useState("");
@@ -647,6 +660,32 @@ export default function MeetingPage() {
     setNewAgendaMinutes("");
   }
 
+  function addQuickAgendaToList() {
+    const t = quickAgendaInput.trim();
+    if (!t) return;
+    setQuickAgendaList((prev) => [
+      ...prev,
+      { title: t, minutes: quickAgendaMinutes },
+    ]);
+    setQuickAgendaInput("");
+    setQuickAgendaMinutes("");
+  }
+
+  function removeQuickAgendaFromList(idx: number) {
+    setQuickAgendaList((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // "지금 바로 시작" 모달 닫기 — 입력 잔존 방지
+  function closeQuickstartModal() {
+    setModalOpen(null);
+    setQuickTopic("");
+    setQuickMeetingType("regular");
+    setQuickMinutes(30);
+    setQuickAgendaList([]);
+    setQuickAgendaInput("");
+    setQuickAgendaMinutes("");
+  }
+
   async function createMeeting() {
     if (!team || busy) return;
     if (!newDate) {
@@ -696,6 +735,49 @@ export default function MeetingPage() {
       showToast((e as Error).message, "error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // "지금 바로 시작" — 날짜/시간 입력 없이 현재 시각으로 생성 후 곧바로 시작하고
+  // 회의 창(보조 창)을 연다. 헤드셋 안내 모달 확인 후 호출된다.
+  async function startMeetingNow() {
+    if (!team || quickStarting) return;
+    if (!quickMinutes) {
+      showToast("예상 소요 시간을 입력해 주세요", "error");
+      return;
+    }
+    setQuickStarting(true);
+    try {
+      const created = await apiPost<Meeting>("/meetings", {
+        team_id: team.id,
+        scheduled_at: new Date().toISOString(),
+        total_minutes: quickMinutes,
+        topic: quickTopic.trim() || undefined,
+        meeting_type: quickMeetingType,
+      });
+      for (const ag of quickAgendaList) {
+        await apiPost(`/meetings/${created.id}/agendas`, {
+          title: ag.title,
+          ...(ag.minutes !== "" ? { estimated_minutes: ag.minutes } : {}),
+        });
+      }
+      await apiPost(`/meetings/${created.id}/start`);
+      closeQuickstartModal();
+      await loadMeetings();
+      setSelectedId(created.id);
+      const win = openCompanion(created.id, team.id);
+      if (!window.mooimhacha?.isElectron && win === null) {
+        showToast(
+          "회의는 시작됐지만 팝업이 차단됐어요. 회의실 탭에서 회의 창을 다시 열어주세요.",
+          "error",
+        );
+      } else {
+        showToast("회의가 시작되었습니다");
+      }
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    } finally {
+      setQuickStarting(false);
     }
   }
 
@@ -860,12 +942,22 @@ export default function MeetingPage() {
         <div className="msidebar">
           <div className="msb-head">
             <span>회의 목록</span>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setModalOpen("meeting")}
-            >
-              <i className="ti ti-plus" />
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="btn btn-primary btn-sm"
+                style={{ background: "var(--green)", color: "#fff" }}
+                onClick={() => setModalOpen("quickstart")}
+                title="지금 바로 회의 시작"
+              >
+                <i className="ti ti-bolt" /> 바로 시작
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setModalOpen("meeting")}
+              >
+                <i className="ti ti-plus" />
+              </button>
+            </div>
           </div>
           <div className="msb-list scroll">
             {meetings.length === 0 && (
@@ -1767,7 +1859,7 @@ export default function MeetingPage() {
                       <input
                         className="input"
                         type="number"
-                        min={1}
+                        min={5}
                         step={5}
                         value={editMinutes}
                         disabled={selected.status === "ended"}
@@ -1828,6 +1920,8 @@ export default function MeetingPage() {
             setModalOpen(null);
             if (headsetAction === "start") {
               void startMeeting();
+            } else if (headsetAction === "quickstart") {
+              void startMeetingNow();
             } else {
               void attendMeeting();
             }
@@ -1977,6 +2071,142 @@ export default function MeetingPage() {
               type="button"
               className="btn btn-sm agenda-add-btn"
               onClick={addAgendaToList}
+            >
+              <i className="ti ti-plus" /> 추가
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* 지금 바로 시작 모달 — 날짜/시간 없이 즉시 생성 후 시작 */}
+      {modalOpen === "quickstart" && (
+        <Modal
+          title="지금 바로 시작"
+          onClose={closeQuickstartModal}
+          actions={
+            <>
+              <button className="btn" onClick={closeQuickstartModal}>
+                취소
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  if (!quickMinutes) {
+                    showToast("예상 소요 시간을 입력해 주세요", "error");
+                    return;
+                  }
+                  setHeadsetAction("quickstart");
+                  setModalOpen("headset");
+                }}
+                disabled={quickStarting}
+              >
+                {quickStarting ? "시작 중…" : "시작하기"}
+              </button>
+            </>
+          }
+        >
+          <div className="modal-sub">
+            지금 시각으로 회의를 만들고 곧바로 시작합니다.
+          </div>
+          <div className="field">
+            <label className="field-label">회의 이름</label>
+            <input
+              className="input"
+              placeholder="예) 중간 점검 회의"
+              maxLength={200}
+              value={quickTopic}
+              onChange={(e) => setQuickTopic(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label">회의 유형</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className={`btn btn-sm${quickMeetingType === "regular" ? " btn-primary" : ""}`}
+                onClick={() => setQuickMeetingType("regular")}
+              >
+                전체 회의
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm${quickMeetingType === "partial" ? " btn-primary" : ""}`}
+                onClick={() => setQuickMeetingType("partial")}
+              >
+                부분 회의
+              </button>
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label">예상 소요 시간 (분)</label>
+            <input
+              className="input"
+              type="number"
+              min={5}
+              step={5}
+              value={quickMinutes}
+              onChange={(e) =>
+                setQuickMinutes(
+                  e.target.value === "" ? "" : Number(e.target.value),
+                )
+              }
+            />
+          </div>
+          <div className="field">
+            <label className="field-label">
+              아젠다 <span className="opt">(선택)</span>
+            </label>
+            {quickAgendaList.length > 0 && (
+              <div className="agenda-chips">
+                {quickAgendaList.map((ag, i) => (
+                  <div className="agenda-chip" key={i}>
+                    <span className="agenda-chip-title">{ag.title}</span>
+                    {ag.minutes !== "" && (
+                      <span className="agenda-chip-min">{ag.minutes}분</span>
+                    )}
+                    <button
+                      type="button"
+                      className="agenda-chip-x"
+                      onClick={() => removeQuickAgendaFromList(i)}
+                      aria-label="아젠다 삭제"
+                    >
+                      <i className="ti ti-x" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="agenda-add">
+              <input
+                className="input"
+                placeholder="아젠다 제목"
+                maxLength={200}
+                value={quickAgendaInput}
+                onChange={(e) => setQuickAgendaInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    addQuickAgendaToList();
+                  }
+                }}
+              />
+              <input
+                className="input agenda-add-min"
+                type="number"
+                min={0}
+                placeholder="분"
+                value={quickAgendaMinutes}
+                onChange={(e) =>
+                  setQuickAgendaMinutes(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm agenda-add-btn"
+              onClick={addQuickAgendaToList}
             >
               <i className="ti ti-plus" /> 추가
             </button>
