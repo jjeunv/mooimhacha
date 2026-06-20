@@ -5,6 +5,7 @@ import { getUser, clearSession } from "@/lib/auth";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import Card from "@/components/Card";
+import Modal from "@/components/Modal";
 import ProfileEditModal from "@/components/ProfileEditModal";
 import type {
   ActionItem,
@@ -98,6 +99,7 @@ export default function HomePage() {
   );
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [joinCode, setJoinCode] = useState("");
+  const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -274,6 +276,7 @@ export default function HomePage() {
       });
       showToast(`${data.name} 참가 완료`);
       setJoinCode("");
+      setJoinModalOpen(false);
       fetchTeams();
     } catch (err) {
       showToast((err as Error).message || "참가 요청 실패");
@@ -299,6 +302,9 @@ export default function HomePage() {
           무임<em>하차</em>
         </div>
         <div className="tn-right">
+          <button className="btn btn-sm" onClick={() => setJoinModalOpen(true)}>
+            <i className="ti ti-key" /> 그룹 참가
+          </button>
           <button
             className="btn btn-primary btn-sm"
             onClick={() => navigate("/onboarding")}
@@ -472,23 +478,6 @@ export default function HomePage() {
             <div className="sec-head">
               <div className="sec-title">
                 <i className="ti ti-layout-grid" /> 내 현황
-              </div>
-            </div>
-            <div className="join-box" style={{ marginBottom: 14 }}>
-              <div className="join-label">
-                <i className="ti ti-key" /> 초대코드로 참가
-              </div>
-              <div className="join-row">
-                <input
-                  className="join-input"
-                  placeholder="ABCD1234"
-                  maxLength={8}
-                  value={joinCode}
-                  onChange={(e) => fmtCode(e.target.value)}
-                />
-                <button className="btn btn-primary" onClick={joinGroup}>
-                  참가하기
-                </button>
               </div>
             </div>
             {todos.length > 0 && (
@@ -681,6 +670,50 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+      {joinModalOpen && (
+        <Modal
+          title="초대코드로 참가"
+          onClose={() => {
+            setJoinModalOpen(false);
+            setJoinCode("");
+          }}
+          actions={
+            <>
+              <button
+                className="btn"
+                onClick={() => {
+                  setJoinModalOpen(false);
+                  setJoinCode("");
+                }}
+              >
+                취소
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void joinGroup()}
+              >
+                참가하기
+              </button>
+            </>
+          }
+        >
+          <div className="field">
+            <label className="field-label">초대코드</label>
+            <input
+              className="input"
+              placeholder="ABCD1234"
+              maxLength={8}
+              value={joinCode}
+              onChange={(e) => fmtCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing)
+                  void joinGroup();
+              }}
+              autoFocus
+            />
+          </div>
+        </Modal>
+      )}
       {profileEditOpen && (
         <ProfileEditModal onClose={() => setProfileEditOpen(false)} />
       )}
