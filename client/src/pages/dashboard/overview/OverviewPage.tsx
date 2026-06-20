@@ -397,12 +397,13 @@ export default function OverviewPage() {
           )}
           {derived.open.slice(0, 10).map((t) => {
             const due = taskDueLabel(t.due_date);
+            const isMyTask = t.assignee_id === currentUser?.id;
             return (
               <div key={t.id} className="task-mini">
                 <div
                   className="chk-mini"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => void toggleTask(t)}
+                  style={{ cursor: isMyTask ? "pointer" : "default" }}
+                  onClick={isMyTask ? () => void toggleTask(t) : undefined}
                 />
                 <div style={{ flex: 1 }}>{t.description}</div>
                 <span

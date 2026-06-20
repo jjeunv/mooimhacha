@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { ActionItem } from '../entities/action-item.entity';
+import { Team } from '../entities/team.entity';
 import { TeamSettings } from '../entities/team-settings.entity';
 import { User } from '../entities/user.entity';
 import { TeamsService } from '../teams/teams.service';
@@ -14,6 +15,8 @@ export class ActionItemsService {
   constructor(
     @InjectRepository(ActionItem)
     private actionRepo: Repository<ActionItem>,
+    @InjectRepository(Team)
+    private teamRepo: Repository<Team>,
     @InjectRepository(TeamSettings)
     private settingsRepo: Repository<TeamSettings>,
     @InjectRepository(User)
@@ -97,9 +100,10 @@ export class ActionItemsService {
   }
 
   private async notifyTaskDone(action: ActionItem): Promise<void> {
-    const settings = await this.settingsRepo.findOne({
-      where: { team_id: action.team_id },
-    });
+    const [settings, team] = await Promise.all([
+      this.settingsRepo.findOne({ where: { team_id: action.team_id } }),
+      this.teamRepo.findOne({ where: { id: action.team_id } }),
+    ]);
     if (!settings?.slack_bot_token || !settings.slack_channel_id) return;
 
     let assigneeName = '담당자';
@@ -113,7 +117,10 @@ export class ActionItemsService {
     await this.slackService.sendChannelMessage(
       settings.slack_bot_token,
       settings.slack_channel_id,
-      `✅ ${assigneeName} [${action.description}] 완료`,
+      [
+        `✅ *태스크 완료* — ${team?.name ?? '팀'}`,
+        `> *${assigneeName}* · ${action.description}`,
+      ].join('\n'),
     );
   }
 }
