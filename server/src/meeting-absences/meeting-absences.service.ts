@@ -10,7 +10,10 @@ import { PresenceEvent } from '../entities/presence-event.entity';
 import { Meeting } from '../entities/meeting.entity';
 import { MeetingAbsence } from '../entities/meeting-absence.entity';
 import { AbsenceConsent } from '../entities/absence-consent.entity';
+import { User } from '../entities/user.entity';
+import { TeamSettings } from '../entities/team-settings.entity';
 import { TeamsService } from '../teams/teams.service';
+import { SlackService } from '../slack/slack.service';
 import { CreateAbsenceDto } from './dto/create-absence.dto';
 
 export type AttendanceStatus = 'present' | 'late' | 'absent' | 'excused';
@@ -28,7 +31,12 @@ export class MeetingAbsencesService {
     private absenceRepo: Repository<MeetingAbsence>,
     @InjectRepository(AbsenceConsent)
     private consentRepo: Repository<AbsenceConsent>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+    @InjectRepository(TeamSettings)
+    private settingsRepo: Repository<TeamSettings>,
     private teamsService: TeamsService,
+    private slackService: SlackService,
   ) {}
 
   // 종료된 회의의 출결 현황 — presence(입장 기록) + 저장된 ContributionScore + 사유/동의 조합
@@ -214,21 +222,25 @@ export class MeetingAbsencesService {
     const existing = await this.absenceRepo.findOne({
       where: { meeting_id: meetingId, user_id: userId },
     });
+    let saved: MeetingAbsence;
     if (existing) {
       if (existing.status === 'approved') {
         throw new BadRequestException('이미 인정된 결석은 수정할 수 없습니다.');
       }
       existing.reason = dto.reason;
-      return this.absenceRepo.save(existing);
+      saved = await this.absenceRepo.save(existing);
+    } else {
+      saved = await this.absenceRepo.save(
+        this.absenceRepo.create({
+          meeting_id: meetingId,
+          user_id: userId,
+          reason: dto.reason,
+          status: 'pending',
+        }),
+      );
     }
-    return this.absenceRepo.save(
-      this.absenceRepo.create({
-        meeting_id: meetingId,
-        user_id: userId,
-        reason: dto.reason,
-        status: 'pending',
-      }),
-    );
+    void this.notifyAbsenceCreated(meeting, userId, isLate);
+    return saved;
   }
 
   // 동의 — 결석자 제외 팀원, 멱등. 정족수 도달 시 자동 승인.
@@ -263,6 +275,7 @@ export class MeetingAbsencesService {
     if (count >= required && required > 0) {
       absence.status = 'approved';
       await this.absenceRepo.save(absence);
+      void this.notifyAbsenceApproved(meeting, absence);
     }
     return {
       status: absence.status,
@@ -336,6 +349,68 @@ export class MeetingAbsencesService {
       consent_count: count,
       consent_required: required,
     };
+  }
+
+  // --- Slack 알림 ---
+
+  private async notifyAbsenceCreated(
+    meeting: Meeting,
+    userId: number,
+    isLate: boolean,
+  ): Promise<void> {
+    const settings = await this.settingsRepo.findOne({
+      where: { team_id: meeting.team_id },
+    });
+    if (!settings?.slack_bot_token || !settings.slack_channel_id) return;
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    const name = user?.name ?? '팀원';
+    const topic = meeting.topic ?? '회의';
+    const label = isLate ? '지각' : '결석';
+    await this.slackService.sendChannelMessage(
+      settings.slack_bot_token,
+      settings.slack_channel_id,
+      `🔔 ${name}님이 [${topic}] ${label} 사유를 입력했습니다. 동의해주세요!`,
+    );
+  }
+
+  private async notifyAbsenceApproved(
+    meeting: Meeting,
+    absence: MeetingAbsence,
+  ): Promise<void> {
+    const settings = await this.settingsRepo.findOne({
+      where: { team_id: meeting.team_id },
+    });
+    if (!settings?.slack_bot_token) return;
+    const user = await this.userRepo.findOne({
+      where: { id: absence.user_id },
+    });
+    if (!user?.slack_user_id) return;
+    const presenceEvents = await this.presenceRepo.find({
+      where: [
+        {
+          meeting_id: meeting.id,
+          user_id: absence.user_id,
+          event_type: 'join',
+        },
+        {
+          meeting_id: meeting.id,
+          user_id: absence.user_id,
+          event_type: 'reconnect',
+        },
+      ],
+    });
+    const isLate = this.isLateByPresence(
+      meeting,
+      presenceEvents,
+      Number(absence.user_id),
+    );
+    const label = isLate ? '지각' : '결석';
+    const topic = meeting.topic ?? '회의';
+    await this.slackService.sendDm(
+      settings.slack_bot_token,
+      user.slack_user_id,
+      `✅ [${topic}] ${label} 사유가 승인됐습니다`,
+    );
   }
 
   // --- 헬퍼 ---

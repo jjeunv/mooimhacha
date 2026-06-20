@@ -8,10 +8,7 @@ import { In, Repository } from 'typeorm';
 import { ActionItem } from '../entities/action-item.entity';
 import { TaskExtensionRequest } from '../entities/task-extension-request.entity';
 import { User } from '../entities/user.entity';
-import { TeamMembership } from '../entities/team-membership.entity';
-import { TeamSettings } from '../entities/team-settings.entity';
 import { TeamsService } from '../teams/teams.service';
-import { SlackService } from '../slack/slack.service';
 import { CreateExtensionDto } from './dto/create-extension.dto';
 
 @Injectable()
@@ -23,12 +20,7 @@ export class TaskExtensionsService {
     private actionRepo: Repository<ActionItem>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
-    @InjectRepository(TeamMembership)
-    private membershipRepo: Repository<TeamMembership>,
-    @InjectRepository(TeamSettings)
-    private settingsRepo: Repository<TeamSettings>,
     private teamsService: TeamsService,
-    private slackService: SlackService,
   ) {}
 
   // 팀원 누구나 진행 중인 태스크의 이름·난이도·담당자·마감일 변경 요청
@@ -85,8 +77,6 @@ export class TaskExtensionsService {
     const result = existing
       ? await this.extRepo.save({ ...existing, ...payload })
       : await this.extRepo.save(this.extRepo.create(payload));
-
-    void this.notifyLeaderOfRequest(userId, action);
 
     return result;
   }
@@ -151,7 +141,6 @@ export class TaskExtensionsService {
       await this.actionRepo.remove(action);
       ext.status = 'approved';
       await this.extRepo.save(ext);
-      void this.notifyRequesterOfApproval(Number(ext.requester_id), action);
       return { status: 'approved' };
     }
 
@@ -170,7 +159,6 @@ export class TaskExtensionsService {
     ext.status = 'approved';
     await this.extRepo.save(ext);
 
-    void this.notifyRequesterOfApproval(Number(ext.requester_id), action);
     return { status: 'approved' };
   }
 
@@ -199,53 +187,5 @@ export class TaskExtensionsService {
     if (ids.length === 0) return new Map();
     const users = await this.userRepo.find({ where: { id: In(ids) } });
     return new Map(users.map((u) => [Number(u.id), u.name]));
-  }
-
-  private async notifyLeaderOfRequest(
-    requesterId: number,
-    action: ActionItem,
-  ): Promise<void> {
-    const settings = await this.settingsRepo.findOne({
-      where: { team_id: action.team_id },
-    });
-    if (!settings?.slack_bot_token) return;
-
-    const leaderMembership = await this.membershipRepo.findOne({
-      where: { team_id: action.team_id, role: 'leader' },
-    });
-    if (!leaderMembership) return;
-
-    const [leader, requester] = await Promise.all([
-      this.userRepo.findOne({ where: { id: leaderMembership.user_id } }),
-      this.userRepo.findOne({ where: { id: requesterId } }),
-    ]);
-    if (!leader?.slack_user_id) return;
-
-    await this.slackService.sendDm(
-      settings.slack_bot_token,
-      leader.slack_user_id,
-      `🔔 ${requester?.name ?? '팀원'}님이 [${action.description}] 변경을 요청했습니다`,
-    );
-  }
-
-  private async notifyRequesterOfApproval(
-    requesterId: number,
-    action: ActionItem,
-  ): Promise<void> {
-    const settings = await this.settingsRepo.findOne({
-      where: { team_id: action.team_id },
-    });
-    if (!settings?.slack_bot_token) return;
-
-    const requester = await this.userRepo.findOne({
-      where: { id: requesterId },
-    });
-    if (!requester?.slack_user_id) return;
-
-    await this.slackService.sendDm(
-      settings.slack_bot_token,
-      requester.slack_user_id,
-      `✅ [${action.description}] 변경 요청이 승인됐습니다`,
-    );
   }
 }
