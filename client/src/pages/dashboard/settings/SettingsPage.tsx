@@ -311,6 +311,47 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      {/* 초대 코드 */}
+      <Card icon="ti ti-key" title="초대 코드">
+        <div style={{ padding: "8px 16px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                flex: 1,
+                background: "var(--surface-2)",
+                border: "1px solid var(--border-2)",
+                borderRadius: 10,
+                padding: "10px 14px",
+                fontFamily: "monospace",
+                fontSize: 18,
+                fontWeight: 700,
+                letterSpacing: 2,
+              }}
+            >
+              {detail?.invite_code ?? "--------"}
+            </div>
+            <button
+              className="btn"
+              onClick={copyInviteCode}
+              style={inviteCopied ? { color: "var(--green)" } : undefined}
+            >
+              <i className={inviteCopied ? "ti ti-check" : "ti ti-copy"} />
+              {inviteCopied ? "복사됨" : "복사"}
+            </button>
+            {isLeader && (
+              <button className="btn" onClick={regenerateCode}>
+                <i className="ti ti-refresh" /> 재발급
+              </button>
+            )}
+          </div>
+          <div
+            style={{ marginTop: 8, fontSize: 12, color: "var(--text-soft)" }}
+          >
+            이 코드를 팀원에게 공유하면 팀에 합류할 수 있습니다.
+          </div>
+        </div>
+      </Card>
+
       {/* 멤버 관리 */}
       <Card icon="ti ti-users" title="멤버 관리">
         <div style={{ padding: "8px 16px 16px" }}>
@@ -380,47 +421,6 @@ export default function SettingsPage() {
               멤버 정보를 불러오는 중입니다…
             </div>
           )}
-        </div>
-      </Card>
-
-      {/* 초대 코드 */}
-      <Card icon="ti ti-key" title="초대 코드">
-        <div style={{ padding: "8px 16px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                flex: 1,
-                background: "var(--surface-2)",
-                border: "1px solid var(--border-2)",
-                borderRadius: 10,
-                padding: "10px 14px",
-                fontFamily: "monospace",
-                fontSize: 18,
-                fontWeight: 700,
-                letterSpacing: 2,
-              }}
-            >
-              {detail?.invite_code ?? "--------"}
-            </div>
-            <button
-              className="btn"
-              onClick={copyInviteCode}
-              style={inviteCopied ? { color: "var(--green)" } : undefined}
-            >
-              <i className={inviteCopied ? "ti ti-check" : "ti ti-copy"} />
-              {inviteCopied ? "복사됨" : "복사"}
-            </button>
-            {isLeader && (
-              <button className="btn" onClick={regenerateCode}>
-                <i className="ti ti-refresh" /> 재발급
-              </button>
-            )}
-          </div>
-          <div
-            style={{ marginTop: 8, fontSize: 12, color: "var(--text-soft)" }}
-          >
-            이 코드를 팀원에게 공유하면 팀에 합류할 수 있습니다.
-          </div>
         </div>
       </Card>
 
@@ -592,21 +592,27 @@ export default function SettingsPage() {
             gap: 14,
           }}
         >
-          {isLeader && (
+          {isLeader && settings && (
             <>
               <div className="field">
                 <label className="field-label">워크스페이스 연결</label>
                 {settings.slack_bot_token ? (
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 10 }}
-                  >
-                    <span style={{ fontSize: 13, color: "var(--green)" }}>
-                      <i className="ti ti-check" /> 연결됨
-                    </span>
-                    <button
-                      className="btn btn-sm btn-danger"
-                      onClick={disconnectSlack}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <div
+                      className="input"
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        color: "var(--green)",
+                        fontSize: 13,
+                      }}
                     >
+                      <i className="ti ti-circle-check-filled" />
+                      연결됨
+                    </div>
+                    <button className="btn" onClick={disconnectSlack}>
                       연결 해제
                     </button>
                   </div>
@@ -630,17 +636,27 @@ export default function SettingsPage() {
               </div>
               <div className="field">
                 <label className="field-label">Slack Channel ID</label>
-                <input
-                  className="input"
-                  placeholder="C0123456789"
-                  value={settings.slack_channel_id ?? ""}
-                  onChange={(e) =>
-                    setSettings(
-                      (s) => s && { ...s, slack_channel_id: e.target.value },
-                    )
-                  }
-                  maxLength={32}
-                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    style={{ flex: 1 }}
+                    placeholder="C0123456789"
+                    value={settings.slack_channel_id ?? ""}
+                    onChange={(e) =>
+                      setSettings(
+                        (s) => s && { ...s, slack_channel_id: e.target.value },
+                      )
+                    }
+                    maxLength={32}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={saveSettings}
+                    disabled={saving}
+                  >
+                    저장
+                  </button>
+                </div>
                 <p
                   style={{
                     margin: "6px 0 0",
@@ -653,14 +669,6 @@ export default function SettingsPage() {
                   채널 ID 복사
                 </p>
               </div>
-              <button
-                className="btn btn-primary"
-                style={{ alignSelf: "flex-end" }}
-                onClick={saveSettings}
-                disabled={saving}
-              >
-                저장
-              </button>
               <hr
                 style={{
                   border: "none",
@@ -684,70 +692,110 @@ export default function SettingsPage() {
               <br />
               Slack 앱 → 프로필 → 더보기 → Member ID 복사
             </p>
-            <input
-              className="input"
-              placeholder="U0123456789"
-              value={slackUserId}
-              onChange={(e) => setSlackUserId(e.target.value)}
-              maxLength={32}
-            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="U0123456789"
+                value={slackUserId}
+                onChange={(e) => setSlackUserId(e.target.value)}
+                maxLength={32}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={saveSlackUserId}
+                disabled={profileSaving}
+              >
+                저장
+              </button>
+            </div>
           </div>
-          <button
-            className="btn btn-primary"
-            style={{ alignSelf: "flex-end" }}
-            onClick={saveSlackUserId}
-            disabled={profileSaving}
-          >
-            저장
-          </button>
         </div>
       </Card>
 
-      {/* 팀 탈퇴 — 본인 */}
-      <Card icon="ti ti-door-exit" title="팀 탈퇴">
-        <div style={{ padding: "8px 16px 16px" }}>
-          <p
+      {/* 위험 구역 */}
+      <Card icon="ti ti-alert-triangle" title="위험 구역">
+        <div
+          style={{
+            padding: "8px 16px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <div
             style={{
-              fontSize: 13,
-              color: "var(--text-soft)",
-              margin: "0 0 12px",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 12,
             }}
           >
-            {isLeader
-              ? "팀장은 다른 멤버에게 팀장을 위임한 뒤 나갈 수 있습니다."
-              : "팀에서 나가면 다시 합류할 때 초대코드가 필요합니다."}
-          </p>
-          <button
-            className="btn btn-danger"
-            onClick={() => setMemberAction({ kind: "leave" })}
-          >
-            <i className="ti ti-door-exit" /> 팀 나가기
-          </button>
-        </div>
-      </Card>
-
-      {/* 팀 삭제 — 팀장만 */}
-      {isLeader && (
-        <Card icon="ti ti-trash" title="팀 삭제">
-          <div style={{ padding: "8px 16px 16px" }}>
-            <p
-              style={{
-                fontSize: 13,
-                color: "var(--text-soft)",
-                margin: "0 0 12px",
-              }}
-            >
-              팀을 삭제하면 모든 멤버십·설정·기록이 영구적으로 사라집니다.
-            </p>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>
+                팀 나가기
+              </div>
+              <p
+                style={{ fontSize: 12.5, color: "var(--text-soft)", margin: 0 }}
+              >
+                {isLeader
+                  ? "팀장은 다른 멤버에게 팀장을 위임한 뒤 나갈 수 있습니다."
+                  : "팀에서 나가면 다시 합류할 때 초대코드가 필요합니다."}
+              </p>
+            </div>
             <button
               className="btn btn-danger"
-              onClick={() => setDeleteModalOpen(true)}
+              style={{ flexShrink: 0 }}
+              onClick={() => setMemberAction({ kind: "leave" })}
             >
-              <i className="ti ti-trash" /> 팀 삭제
+              <i className="ti ti-door-exit" /> 나가기
             </button>
           </div>
-        </Card>
-      )}
+          {isLeader && (
+            <>
+              <hr
+                style={{
+                  border: "none",
+                  borderTop: "1px solid var(--border)",
+                  margin: 0,
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div
+                    style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}
+                  >
+                    팀 삭제
+                  </div>
+                  <p
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--text-soft)",
+                      margin: 0,
+                    }}
+                  >
+                    팀을 삭제하면 모든 멤버십·설정·기록이 영구적으로 사라집니다.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-danger"
+                  style={{ flexShrink: 0 }}
+                  onClick={() => setDeleteModalOpen(true)}
+                >
+                  <i className="ti ti-trash" /> 삭제
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
 
       {/* 삭제 확인 모달 */}
       {deleteModalOpen && (
