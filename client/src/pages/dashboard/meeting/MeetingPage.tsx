@@ -2348,6 +2348,7 @@ export default function MeetingPage() {
                 placeholder="예) 가족 행사로 참석하지 못했습니다."
                 value={absenceInput}
                 onChange={(e) => setAbsenceInput(e.target.value)}
+                autoFocus
               />
             </div>
           </>
