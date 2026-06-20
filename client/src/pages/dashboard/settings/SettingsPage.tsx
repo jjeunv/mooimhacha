@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { useOutletContext, useNavigate } from "react-router-dom";
+import {
+  useOutletContext,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import { useToast } from "@/hooks/useToast";
 import { apiFetch, authHeader } from "@/lib/apiFetch";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
@@ -25,12 +29,15 @@ interface Settings {
   min_meeting_minutes: number;
   punctuality_grace_ratio: number;
   leader_bonus_multiplier: number;
+  slack_bot_token?: string | null;
+  slack_channel_id?: string | null;
 }
 
 export default function SettingsPage() {
   const team = useOutletContext<TeamContext | null>();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isLeader = team?.my_role === "leader";
 
   const [detail, setDetail] = useState<TeamDetail | null>(null);
@@ -52,14 +59,14 @@ export default function SettingsPage() {
     | null
   >(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [slackUserId, setSlackUserId] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
 
   const loadMembers = useCallback(() => {
     if (!team) return;
     apiGet<{ members: TeamContribution[] }>(`/teams/${team.id}/contributions`)
       .then((d) =>
-        setMembers(
-          [...d.members].sort((a) => (a.role === "leader" ? -1 : 1)),
-        ),
+        setMembers([...d.members].sort((a) => (a.role === "leader" ? -1 : 1))),
       )
       .catch(() => {});
   }, [team]);
@@ -99,6 +106,25 @@ export default function SettingsPage() {
       setActionBusy(false);
     }
   }
+
+  useEffect(() => {
+    apiFetch<{ slack_user_id?: string | null }>("/api/auth/me", {
+      headers: authHeader(),
+    })
+      .then((d) => setSlackUserId(d.slack_user_id ?? ""))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const slack = searchParams.get("slack");
+    if (slack === "connected") {
+      showToast("Slack 워크스페이스 연결됐습니다");
+      setSearchParams({}, { replace: true });
+    } else if (slack === "error") {
+      showToast("Slack 연결에 실패했습니다", "error");
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams, showToast]);
 
   useEffect(() => {
     if (!team) return;
@@ -161,16 +187,63 @@ export default function SettingsPage() {
     if (!team || !settings) return;
     setSaving(true);
     try {
+      // slack_bot_token은 OAuth로 관리되므로 제외
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { slack_bot_token: _token, ...rest } = settings;
       await apiFetch(`/api/teams/${team.id}/settings`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...authHeader() },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(rest),
       });
       showToast("설정이 저장됐습니다");
     } catch (err) {
       showToast((err as Error).message || "저장 실패");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function addToSlack() {
+    if (!team) return;
+    try {
+      const data = await apiFetch<{ url: string }>(
+        `/api/slack/oauth/url?team_id=${team.id}`,
+        { headers: authHeader() },
+      );
+      window.location.href = data.url;
+    } catch (err) {
+      showToast((err as Error).message || "Slack 연결 실패", "error");
+    }
+  }
+
+  async function disconnectSlack() {
+    if (!team) return;
+    try {
+      await apiFetch(`/api/teams/${team.id}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeader() },
+        body: JSON.stringify({ slack_bot_token: null }),
+      });
+      setSettings((s) => s && { ...s, slack_bot_token: null });
+      showToast("Slack 연결이 해제됐습니다");
+    } catch (err) {
+      showToast((err as Error).message || "해제 실패", "error");
+    }
+  }
+
+  async function saveSlackUserId() {
+    setProfileSaving(true);
+    try {
+      await apiFetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeader() },
+        body: JSON.stringify({ slack_user_id: slackUserId.trim() || null }),
+      });
+      showToast("Slack User ID가 저장됐습니다");
+    } catch (err) {
+      showToast((err as Error).message || "저장 실패", "error");
+    } finally {
+      setProfileSaving(false);
     }
   }
 
@@ -485,6 +558,66 @@ export default function SettingsPage() {
             </div>
 
             {isLeader && (
+              <>
+                <hr
+                  style={{
+                    border: "none",
+                    borderTop: "1px solid var(--border)",
+                    margin: "4px 0",
+                  }}
+                />
+                <div className="field">
+                  <label className="field-label">Slack 워크스페이스</label>
+                  {settings.slack_bot_token ? (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <span style={{ fontSize: 13, color: "var(--green)" }}>
+                        <i className="ti ti-check" /> 연결됨
+                      </span>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={disconnectSlack}
+                      >
+                        연결 해제
+                      </button>
+                    </div>
+                  ) : (
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void addToSlack();
+                      }}
+                    >
+                      <img
+                        alt="Add to Slack"
+                        height="40"
+                        width="139"
+                        src="https://platform.slack-edge.com/img/add_to_slack.png"
+                        srcSet="https://platform.slack-edge.com/img/add_to_slack.png 1x, https://platform.slack-edge.com/img/add_to_slack@2x.png 2x"
+                      />
+                    </a>
+                  )}
+                </div>
+                <div className="field">
+                  <label className="field-label">Slack Channel ID</label>
+                  <input
+                    className="input"
+                    placeholder="C0123456789"
+                    value={settings.slack_channel_id ?? ""}
+                    onChange={(e) =>
+                      setSettings(
+                        (s) => s && { ...s, slack_channel_id: e.target.value },
+                      )
+                    }
+                    maxLength={32}
+                  />
+                </div>
+              </>
+            )}
+
+            {isLeader && (
               <button
                 className="btn btn-primary"
                 style={{ alignSelf: "flex-end" }}
@@ -508,6 +641,44 @@ export default function SettingsPage() {
           </div>
         </Card>
       )}
+
+      {/* Slack 개인 알림 연동 */}
+      <Card icon="ti ti-brand-slack" title="Slack 알림 연동">
+        <div
+          style={{
+            padding: "8px 16px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <p style={{ fontSize: 12.5, color: "var(--text-soft)", margin: 0 }}>
+            Slack DM 알림(마감 하루 전·변경 승인)을 받으려면 내 Slack User ID를
+            입력하세요.
+            <br />
+            Slack 앱 → 프로필 → 더보기 → Member ID 복사
+          </p>
+          <div className="field">
+            <label className="field-label">내 Slack User ID</label>
+            <input
+              className="input"
+              placeholder="U0123456789"
+              value={slackUserId}
+              onChange={(e) => setSlackUserId(e.target.value)}
+              maxLength={32}
+            />
+          </div>
+          <button
+            className="btn btn-primary"
+            style={{ alignSelf: "flex-end" }}
+            onClick={saveSlackUserId}
+            disabled={profileSaving}
+          >
+            저장
+          </button>
+        </div>
+      </Card>
+
       {/* 팀 탈퇴 — 본인 */}
       <Card icon="ti ti-door-exit" title="팀 탈퇴">
         <div style={{ padding: "8px 16px 16px" }}>

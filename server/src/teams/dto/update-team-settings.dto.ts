@@ -1,4 +1,13 @@
-import { IsEnum, IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateTeamSettingsDto {
@@ -48,4 +57,16 @@ export class UpdateTeamSettingsDto {
   @IsNumber()
   @Max(1.0)
   leader_bonus_multiplier?: number;
+
+  @ApiPropertyOptional({ example: 'xoxb-...', description: 'Slack Bot Token' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  slack_bot_token?: string;
+
+  @ApiPropertyOptional({ example: 'C0123456', description: 'Slack 채널 ID' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  slack_channel_id?: string;
 }

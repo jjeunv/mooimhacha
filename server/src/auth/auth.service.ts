@@ -95,8 +95,9 @@ export class AuthService {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('사용자를 찾을 수 없습니다.');
 
-    user.university = dto.university;
-    user.department = dto.department;
+    if (dto.university !== undefined) user.university = dto.university;
+    if (dto.department !== undefined) user.department = dto.department;
+    if (dto.slack_user_id !== undefined) user.slack_user_id = dto.slack_user_id;
     await this.userRepo.save(user);
 
     return {
@@ -104,6 +105,7 @@ export class AuthService {
       name: user.name,
       university: user.university,
       department: user.department,
+      slack_user_id: user.slack_user_id,
     };
   }
 

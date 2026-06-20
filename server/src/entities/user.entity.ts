@@ -33,6 +33,9 @@ export class User {
   @Column({ type: 'boolean', default: false })
   email_opt_out!: boolean;
 
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  slack_user_id!: string | null;
+
   // 탈퇴는 행 내 익명화 방식(이름·카카오 식별자 제거) — deleted_at을 쓰면
   // TypeORM soft-delete 필터가 과거 리포트의 사용자 조인을 null로 만들기 때문.
   @Column({ type: 'boolean', default: false })

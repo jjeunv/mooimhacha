@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import * as nodemailer from 'nodemailer';
 import {
   Notification,
@@ -11,6 +11,9 @@ import {
 import { Meeting } from '../entities/meeting.entity';
 import { TeamMembership } from '../entities/team-membership.entity';
 import { User } from '../entities/user.entity';
+import { ActionItem } from '../entities/action-item.entity';
+import { TeamSettings } from '../entities/team-settings.entity';
+import { SlackService } from '../slack/slack.service';
 
 @Injectable()
 export class NotificationsService {
@@ -26,7 +29,12 @@ export class NotificationsService {
     private membershipRepo: Repository<TeamMembership>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(ActionItem)
+    private actionRepo: Repository<ActionItem>,
+    @InjectRepository(TeamSettings)
+    private settingsRepo: Repository<TeamSettings>,
     private config: ConfigService,
+    private slackService: SlackService,
   ) {
     const host = this.config.get<string>('SMTP_HOST');
     if (host) {
@@ -103,7 +111,6 @@ export class NotificationsService {
         where: { team_id: m.team_id },
       });
       for (const member of members) {
-        // 중복 방지: 동일 회의·유형 알림이 있으면 건너뜀
         const exists = await this.notiRepo.findOne({
           where: {
             user_id: member.user_id,
@@ -116,9 +123,98 @@ export class NotificationsService {
           member.user_id,
           'meeting_soon',
           '회의가 곧 시작됩니다',
-          // 컨테이너 TZ(UTC)와 무관하게 KST로 표시
           `${m.topic ?? '회의'} — ${new Date(m.scheduled_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`,
           { meeting_id: m.id },
+        );
+      }
+    }
+  }
+
+  // 매일 KST 09:00 (UTC 00:00) — 마감 하루 전 태스크 담당자 DM
+  @Cron('0 0 0 * * *')
+  async checkDueTomorrow() {
+    const now = new Date();
+    const tomorrowStart = new Date(now);
+    tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
+    tomorrowStart.setUTCHours(0, 0, 0, 0);
+    const tomorrowEnd = new Date(tomorrowStart);
+    tomorrowEnd.setUTCHours(23, 59, 59, 999);
+
+    const tasks = await this.actionRepo.find({
+      where: {
+        due_date: Between(tomorrowStart, tomorrowEnd),
+        status: In(['todo', 'in_progress']),
+      },
+    });
+
+    for (const task of tasks) {
+      if (!task.assignee_id) continue;
+
+      const exists = await this.notiRepo.findOne({
+        where: { action_item_id: task.id, type: 'task_due_soon' },
+      });
+      if (exists) continue;
+
+      await this.create(
+        Number(task.assignee_id),
+        'task_due_soon',
+        '태스크 마감이 내일입니다',
+        task.description,
+        { action_item_id: task.id },
+      );
+
+      const [user, settings] = await Promise.all([
+        this.userRepo.findOne({ where: { id: task.assignee_id } }),
+        this.settingsRepo.findOne({ where: { team_id: task.team_id } }),
+      ]);
+      if (user?.slack_user_id && settings?.slack_bot_token) {
+        await this.slackService.sendDm(
+          settings.slack_bot_token,
+          user.slack_user_id,
+          `⏰ [${task.description}] 마감이 내일입니다`,
+        );
+      }
+    }
+  }
+
+  // 매분 — 회의 30분 전 팀 채널 알림
+  @Cron(CronExpression.EVERY_MINUTE)
+  async checkMeetingIn30Min() {
+    const now = new Date();
+    const in30 = new Date(now.getTime() + 30 * 60 * 1000);
+    const windowEnd = new Date(in30.getTime() + 60 * 1000);
+
+    const upcoming = await this.meetingRepo.find({
+      where: { status: 'scheduled', scheduled_at: Between(in30, windowEnd) },
+    });
+
+    for (const m of upcoming) {
+      const exists = await this.notiRepo.findOne({
+        where: { meeting_id: m.id, type: 'meeting_30m' },
+      });
+      if (exists) continue;
+
+      const leader = await this.membershipRepo.findOne({
+        where: { team_id: m.team_id, role: 'leader' },
+      });
+      if (leader) {
+        await this.create(
+          leader.user_id,
+          'meeting_30m',
+          '회의가 30분 후 시작됩니다',
+          m.topic ?? '회의',
+          { meeting_id: m.id },
+        );
+      }
+
+      const settings = await this.settingsRepo.findOne({
+        where: { team_id: m.team_id },
+      });
+      if (settings?.slack_bot_token && settings.slack_channel_id) {
+        await this.slackService.sendChannelMessage(
+          settings.slack_bot_token,
+          settings.slack_channel_id,
+          `📢 [${m.topic ?? '회의'}] 30분 후 시작됩니다`,
         );
       }
     }
@@ -129,7 +225,6 @@ export class NotificationsService {
     try {
       const user = await this.userRepo.findOne({ where: { id: userId } });
       if (!user?.kakao_email) return;
-      // 이메일 수신거부 사용자는 메일만 스킵 (인앱 알림은 create()에서 이미 저장됨)
       if (user.email_opt_out) return;
       await this.transporter.sendMail({
         from: this.config.get<string>('MAIL_FROM') ?? 'no-reply@mooimhacha',

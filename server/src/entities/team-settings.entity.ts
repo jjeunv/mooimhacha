@@ -54,6 +54,12 @@ export class TeamSettings {
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 1.0 })
   leader_bonus_multiplier!: number;
 
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  slack_bot_token!: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  slack_channel_id!: string | null;
+
   @CreateDateColumn()
   created_at!: Date;
 

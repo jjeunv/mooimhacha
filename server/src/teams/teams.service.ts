@@ -101,7 +101,9 @@ export class TeamsService {
     for (const m of allMemberships) {
       const tid = Number(m.team_id);
       if (!membersByTeam.has(tid)) membersByTeam.set(tid, []);
-      membersByTeam.get(tid)!.push({ name: userMap.get(Number(m.user_id)) ?? '?', role: m.role });
+      membersByTeam
+        .get(tid)!
+        .push({ name: userMap.get(Number(m.user_id)) ?? '?', role: m.role });
     }
 
     const counts: { team_id: string; count: string }[] =
@@ -360,6 +362,8 @@ export class TeamsService {
       min_meeting_minutes: s.min_meeting_minutes,
       final_task_weight: Number(s.final_task_weight),
       leader_bonus_multiplier: Number(s.leader_bonus_multiplier),
+      slack_bot_token: s.slack_bot_token,
+      slack_channel_id: s.slack_channel_id,
     };
   }
 
