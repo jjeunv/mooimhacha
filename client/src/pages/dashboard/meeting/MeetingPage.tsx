@@ -2549,6 +2549,7 @@ export default function MeetingPage() {
               placeholder="예) 최종 발표 순서 확정"
               value={agTitle}
               onChange={(e) => setAgTitle(e.target.value)}
+              autoFocus
             />
           </div>
           <div className="field">
