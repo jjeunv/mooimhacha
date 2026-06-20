@@ -10,7 +10,9 @@ import {
 export type NotificationType =
   | 'meeting_soon' // 회의 5분 전
   | 'action_assigned' // 액션 확정 시 담당자
-  | 'meeting_confirmed'; // 회의 산출물 확정
+  | 'meeting_confirmed' // 회의 산출물 확정
+  | 'task_due_soon' // 마감 하루 전
+  | 'meeting_30m'; // 회의 30분 전 Slack 중복 방지용
 
 @Entity('notifications')
 @Index(['user_id', 'read'])

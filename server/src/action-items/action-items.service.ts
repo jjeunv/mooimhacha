@@ -2,7 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { ActionItem } from '../entities/action-item.entity';
+import { TeamSettings } from '../entities/team-settings.entity';
+import { User } from '../entities/user.entity';
 import { TeamsService } from '../teams/teams.service';
+import { SlackService } from '../slack/slack.service';
 import { CreateActionItemDto } from './dto/create-action-item.dto';
 import { UpdateActionItemDto } from './dto/update-action-item.dto';
 
@@ -11,7 +14,12 @@ export class ActionItemsService {
   constructor(
     @InjectRepository(ActionItem)
     private actionRepo: Repository<ActionItem>,
+    @InjectRepository(TeamSettings)
+    private settingsRepo: Repository<TeamSettings>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
     private teamsService: TeamsService,
+    private slackService: SlackService,
   ) {}
 
   async create(userId: number, dto: CreateActionItemDto) {
@@ -64,10 +72,15 @@ export class ActionItemsService {
     if (dto.confirmed !== undefined) action.confirmed = dto.confirmed;
     if (dto.status !== undefined) {
       action.status = dto.status;
-      // 완료 시각은 마감 준수 산정에 쓰임
       action.completed_at = dto.status === 'done' ? new Date() : null;
     }
-    return this.actionRepo.save(action);
+    const saved = await this.actionRepo.save(action);
+
+    if (dto.status === 'done') {
+      void this.notifyTaskDone(saved);
+    }
+
+    return saved;
   }
 
   async remove(userId: number, id: number) {
@@ -81,5 +94,26 @@ export class ActionItemsService {
     if (!action) throw new NotFoundException('액션을 찾을 수 없습니다.');
     await this.teamsService.requireMembership(userId, action.team_id);
     return action;
+  }
+
+  private async notifyTaskDone(action: ActionItem): Promise<void> {
+    const settings = await this.settingsRepo.findOne({
+      where: { team_id: action.team_id },
+    });
+    if (!settings?.slack_bot_token || !settings.slack_channel_id) return;
+
+    let assigneeName = '담당자';
+    if (action.assignee_id) {
+      const user = await this.userRepo.findOne({
+        where: { id: action.assignee_id },
+      });
+      if (user) assigneeName = user.name;
+    }
+
+    await this.slackService.sendChannelMessage(
+      settings.slack_bot_token,
+      settings.slack_channel_id,
+      `✅ ${assigneeName} [${action.description}] 완료`,
+    );
   }
 }

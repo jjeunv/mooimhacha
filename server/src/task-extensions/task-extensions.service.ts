@@ -74,10 +74,11 @@ export class TaskExtensionsService {
       status: 'pending' as const,
     };
 
-    if (existing) {
-      return this.extRepo.save({ ...existing, ...payload });
-    }
-    return this.extRepo.save(this.extRepo.create(payload));
+    const result = existing
+      ? await this.extRepo.save({ ...existing, ...payload })
+      : await this.extRepo.save(this.extRepo.create(payload));
+
+    return result;
   }
 
   // 팀의 수정 요청 목록 (status 필터)
@@ -150,7 +151,6 @@ export class TaskExtensionsService {
     if (ext.requested_difficulty !== null)
       action.difficulty = ext.requested_difficulty;
     if (ext.requested_assignee_id !== null) {
-      // -1 = 담당자 해제, 양수 = 새 담당자
       action.assignee_id =
         ext.requested_assignee_id === -1 ? null : ext.requested_assignee_id;
     }
@@ -158,6 +158,7 @@ export class TaskExtensionsService {
     await this.actionRepo.save(action);
     ext.status = 'approved';
     await this.extRepo.save(ext);
+
     return { status: 'approved' };
   }
 

@@ -17,10 +17,12 @@ import { PresenceEvent } from '../entities/presence-event.entity';
 import { AnomalyEvent } from '../entities/anomaly-event.entity';
 import { ContributionScore } from '../entities/contribution-score.entity';
 import { TeamMembership } from '../entities/team-membership.entity';
+import { TeamSettings } from '../entities/team-settings.entity';
 import { TeamsService } from '../teams/teams.service';
 import { ContributionsService } from '../contributions/contributions.service';
 import { LlmService, LLM_INPUT_CHAR_LIMIT } from '../llm/llm.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SlackService } from '../slack/slack.service';
 import { MeetingEvents } from '../events/meeting-events';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { UpdateMeetingDto } from './dto/update-meeting.dto';
@@ -53,10 +55,13 @@ export class MeetingsService {
     private membershipRepo: Repository<TeamMembership>,
     @InjectRepository(PresenceEvent)
     private presenceRepo: Repository<PresenceEvent>,
+    @InjectRepository(TeamSettings)
+    private settingsRepo: Repository<TeamSettings>,
     private teamsService: TeamsService,
     private contributionsService: ContributionsService,
     private llmService: LlmService,
     private notificationsService: NotificationsService,
+    private slackService: SlackService,
     private meetingEvents: MeetingEvents,
     private dataSource: DataSource,
   ) {}
@@ -152,11 +157,24 @@ export class MeetingsService {
       t0_timestamp: meeting.t0_timestamp,
       status: meeting.status,
     });
+    void this.notifyMeetingStarted(meeting);
     return {
       meeting_id: meeting.id,
       t0_timestamp: meeting.t0_timestamp,
       status: meeting.status,
     };
+  }
+
+  private async notifyMeetingStarted(meeting: Meeting): Promise<void> {
+    const settings = await this.settingsRepo.findOne({
+      where: { team_id: meeting.team_id },
+    });
+    if (!settings?.slack_bot_token || !settings.slack_channel_id) return;
+    await this.slackService.sendChannelMessage(
+      settings.slack_bot_token,
+      settings.slack_channel_id,
+      `🚀 [${meeting.topic ?? '회의'}] 지금 바로 시작됐습니다! 참여해주세요`,
+    );
   }
 
   // 회의 종료 — 안건 마감 처리 + 기여도(트랙1) 산정·저장 트리거

@@ -5,7 +5,10 @@ import { ContributionScore } from '../entities/contribution-score.entity';
 import { PresenceEvent } from '../entities/presence-event.entity';
 import { MeetingAbsence } from '../entities/meeting-absence.entity';
 import { AbsenceConsent } from '../entities/absence-consent.entity';
+import { User } from '../entities/user.entity';
+import { TeamSettings } from '../entities/team-settings.entity';
 import { TeamsModule } from '../teams/teams.module';
+import { SlackModule } from '../slack/slack.module';
 import { MeetingAbsencesController } from './meeting-absences.controller';
 import { MeetingAbsencesService } from './meeting-absences.service';
 
@@ -17,8 +20,11 @@ import { MeetingAbsencesService } from './meeting-absences.service';
       PresenceEvent,
       MeetingAbsence,
       AbsenceConsent,
+      User,
+      TeamSettings,
     ]),
     TeamsModule,
+    SlackModule,
   ],
   controllers: [MeetingAbsencesController],
   providers: [MeetingAbsencesService],

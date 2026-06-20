@@ -30,7 +30,9 @@ export class AuthController {
   ) {}
 
   @Get('kakao/url')
-  @ApiOperation({ summary: '카카오 인가 URL 발급 (클라이언트가 이 URL로 이동)' })
+  @ApiOperation({
+    summary: '카카오 인가 URL 발급 (클라이언트가 이 URL로 이동)',
+  })
   kakaoUrl() {
     return { url: this.authService.getKakaoAuthUrl() };
   }
@@ -89,6 +91,7 @@ export class AuthController {
       department: u.department,
       profile_image_url: u.profile_image_url,
       email_opt_out: u.email_opt_out,
+      slack_user_id: u.slack_user_id,
     };
   }
 

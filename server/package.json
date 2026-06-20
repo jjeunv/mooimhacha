@@ -41,6 +41,7 @@
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.1",
     "@nestjs/websockets": "^11.1.26",
+    "@slack/web-api": "^7.17.0",
     "axios": "^1.17.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
