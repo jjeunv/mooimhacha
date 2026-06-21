@@ -364,6 +364,7 @@ export class TeamsService {
       weight_speech_in_meeting: Number(s.weight_speech_in_meeting),
       weight_attend_in_meeting: Number(s.weight_attend_in_meeting),
       leader_bonus_multiplier: Number(s.leader_bonus_multiplier),
+      late_threshold_minutes: s.late_threshold_minutes,
       slack_bot_token: s.slack_bot_token,
       slack_channel_id: s.slack_channel_id,
     };

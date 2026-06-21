@@ -171,6 +171,7 @@ export interface TeamSettings {
   final_task_weight: number;
   leader_bonus_multiplier: number;
   contribution_visibility: "team" | "leader" | "self";
+  late_threshold_minutes: number;
 }
 
 export interface TeamDetail extends Team {

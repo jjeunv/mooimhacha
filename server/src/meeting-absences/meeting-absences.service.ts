@@ -56,6 +56,7 @@ export class MeetingAbsencesService {
         })
       : [];
 
+    const lateThreshold = await this.lateThresholdMinutes(meeting.team_id);
     const joined = this.joinedUserIds(presence);
     const scoreByUser = new Map(scores.map((s) => [Number(s.user_id), s]));
     const absenceByUser = new Map(absences.map((a) => [Number(a.user_id), a]));
@@ -80,6 +81,7 @@ export class MeetingAbsencesService {
           meeting,
           presence,
           m.user_id,
+          lateThreshold,
         );
         const status = this.deriveStatus(
           joined.has(m.user_id),
@@ -120,6 +122,7 @@ export class MeetingAbsencesService {
       where: { team_id: teamId, status: 'ended' },
     });
     if (meetings.length === 0) return [];
+    const lateThreshold = await this.lateThresholdMinutes(teamId);
     const ids = meetings.map((m) => m.id);
     const [myScores, myPresence, allPresence, absences, myConsents] =
       await Promise.all([
@@ -165,6 +168,7 @@ export class MeetingAbsencesService {
         m,
         myPresenceForMeeting,
         userId,
+        lateThreshold,
       );
       const status = this.deriveStatus(
         myJoined.has(mid),
@@ -212,7 +216,12 @@ export class MeetingAbsencesService {
       ],
     });
     const hasJoined = presenceEvents.length > 0;
-    const isLate = this.isLateByPresence(meeting, presenceEvents, userId);
+    const isLate = this.isLateByPresence(
+      meeting,
+      presenceEvents,
+      userId,
+      await this.lateThresholdMinutes(meeting.team_id),
+    );
     if (hasJoined && !isLate) {
       throw new BadRequestException(
         '결석 또는 지각한 경우에만 사유를 입력할 수 있습니다.',
@@ -403,6 +412,7 @@ export class MeetingAbsencesService {
       meeting,
       presenceEvents,
       Number(absence.user_id),
+      settings.late_threshold_minutes ?? 5,
     );
     const label = isLate ? '지각' : '결석';
     const topic = meeting.topic ?? '회의';
@@ -428,11 +438,12 @@ export class MeetingAbsencesService {
     return 'present';
   }
 
-  // 실제 시작(t0) 기준 5분 초과 입장 여부를 presence 이벤트로 직접 판정
+  // 실제 시작(t0) 기준 지각 기준(분) 초과 입장 여부를 presence 이벤트로 직접 판정
   private isLateByPresence(
     meeting: Meeting,
     presence: PresenceEvent[],
     userId: number,
+    thresholdMinutes: number,
   ): boolean {
     if (!meeting.t0_timestamp) return false;
     const joins = presence
@@ -444,7 +455,15 @@ export class MeetingAbsencesService {
       .map((p) => p.timestamp_offset_ms);
     if (joins.length === 0) return false;
     const firstOffset = Math.min(...joins);
-    return Math.max(0, firstOffset) / 1000 > 300;
+    return Math.max(0, firstOffset) / 1000 > thresholdMinutes * 60;
+  }
+
+  // 팀의 지각 기준(분) — 설정이 없으면 기본 5분
+  private async lateThresholdMinutes(teamId: number): Promise<number> {
+    const settings = await this.settingsRepo.findOne({
+      where: { team_id: teamId },
+    });
+    return settings?.late_threshold_minutes ?? 5;
   }
 
   // 그 회의에 입장(join/reconnect) 기록이 있는 user 집합

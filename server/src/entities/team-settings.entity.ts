@@ -61,6 +61,10 @@ export class TeamSettings {
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 1.0 })
   leader_bonus_multiplier!: number;
 
+  // 지각 기준(분) — 회의 시작 후 이 시간 초과 입장 시 '지각' (출결 표시용, 산정 엔진과 별개)
+  @Column({ type: 'int', default: 5 })
+  late_threshold_minutes!: number;
+
   @Column({ type: 'varchar', length: 200, nullable: true })
   slack_bot_token!: string | null;
 
