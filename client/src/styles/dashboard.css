@@ -164,6 +164,16 @@
   font-size: 12px;
   font-weight: 600;
 }
+.sb-mname {
+  flex: 1;
+  min-width: 0;
+}
+.sb-mname > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .me-tag {
   font-size: 9.5px;
   font-weight: 700;
@@ -171,6 +181,9 @@
   color: var(--green);
   padding: 1px 6px;
   border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: max-content;
 }
 .leader-tag {
   font-size: 9.5px;
@@ -179,6 +192,9 @@
   color: #b8860b;
   padding: 1px 6px;
   border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: max-content;
 }
 .sb-spacer {
   flex: 1;
@@ -199,6 +215,65 @@
 .sb-user-role {
   font-size: 10.5px;
   color: var(--text-soft);
+}
+.sb-nick-edit-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+.sb-nick-edit-btn:hover {
+  color: var(--green);
+}
+.sb-nick-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sb-nick-input {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  padding: 3px 7px;
+  width: 100%;
+  outline: none;
+  box-sizing: border-box;
+}
+.sb-nick-actions {
+  display: flex;
+  gap: 4px;
+}
+.sb-nick-btn {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 12px;
+  padding: 2px 6px;
+  display: flex;
+  align-items: center;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.sb-nick-btn:hover {
+  color: var(--green);
+  border-color: var(--green);
 }
 
 .main-area {
@@ -352,6 +427,12 @@
   font-weight: 600;
   width: 62px;
   flex: 0 0 auto;
+}
+.c-name > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .c-bar {
   flex: 1;
