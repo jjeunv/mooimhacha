@@ -20,7 +20,6 @@ import type {
   ActionItem,
   Meeting,
   AttendanceSummary,
-  TaskExtension,
 } from "@/lib/types";
 import OverviewPage from "./overview/OverviewPage";
 import MeetingPage from "./meeting/MeetingPage";
