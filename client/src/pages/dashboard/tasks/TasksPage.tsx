@@ -289,53 +289,14 @@ export default function TasksPage() {
     if (editStatus !== API_TO_STATUS[editTarget.status])
       body.status = STATUS_TO_API[editStatus];
 
-    // 세부사항은 점수에 영향 없는 메모 → 승인 없이 즉시 반영
-    const detailChanged = editDetail.trim() !== (editTarget.detail ?? "");
+    // 세부사항(메모)도 함께 반영 — 점수에 영향 없음
+    if (editDetail.trim() !== (editTarget.detail ?? ""))
+      body.detail = editDetail.trim() || null;
 
-    if (!hasChange && !detailChanged) {
+    if (Object.keys(body).length === 0) {
       showToast("변경된 항목이 없습니다", "error");
       return;
     }
-    // 점수에 영향 주는 변경(이름·난이도·담당자·마감일)만 팀장 승인 필요
-    if (hasChange && !editReason.trim()) {
-      showToast("수정 사유를 입력해 주세요", "error");
-      return;
-    }
-
-    if (detailChanged) {
-      const nextDetail = editDetail.trim() || null;
-      try {
-        await apiPatch(`/action-items/${editTarget.id}`, {
-          detail: nextDetail,
-        });
-        setTasks((ts) =>
-          ts.map((t) =>
-            t.id === editTarget.id ? { ...t, detail: nextDetail } : t,
-          ),
-        );
-      } catch (e) {
-        showToast((e as Error).message, "error");
-        return;
-      }
-    }
-
-    if (hasChange) {
-      body.reason = editReason.trim();
-      if (extensions.get(editTarget.id)?.status === "pending") {
-        setPendingRequestBody(body);
-        setConfirmOverwrite(true);
-        return;
-      }
-      await doSendRequest(editTarget.id, body);
-      return;
-    }
-
-    // 세부사항만 변경된 경우 — 즉시 반영 후 종료
-    setEditTarget(null);
-    showToast("세부사항을 수정했어요");
-  }
-
-  async function doSendRequest(taskId: number, body: Record<string, unknown>) {
     setEditSaving(true);
     try {
       await apiPatch(`/action-items/${editTarget.id}`, body);
@@ -568,7 +529,7 @@ export default function TasksPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {view !== "history" && (
             <>
-              <div className="view-toggle">
+              <div className="view-toggle" data-tour="tk-views">
                 <button
                   className={`vt ${view === "board" ? "active" : ""}`}
                   onClick={() => setView("board")}
@@ -707,53 +668,38 @@ export default function TasksPage() {
                     {colTasks.length}
                   </span>
                 </div>
-                {colTasks.map((t) => {
-                  const status = API_TO_STATUS[t.status];
-                  const dd = dueState(t.due_date);
-                  const danger = status !== "완료" && dd.danger;
-                  const warn = status !== "완료" && dd.warn;
-                  const who = nameOf(t.assignee_id);
-                  return (
-                    <div
-                      key={t.id}
-                      draggable={canEdit(t)}
-                      className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
-                      style={{
-                        cursor: canEdit(t)
-                          ? draggingId === t.id
-                            ? "grabbing"
-                            : "grab"
-                          : "default",
-                        ...stripeStyle(t.assignee_id, danger, warn),
-                      }}
-                      onDragStart={(e) => {
-                        if (!canEdit(t)) return;
-                        setDraggingId(t.id);
-                        e.dataTransfer.setData("taskId", String(t.id));
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragEnd={() => setDraggingId(null)}
-                      onClick={() => canEdit(t) && openEdit(t)}
-                    >
-                      <div className="tc-head">
-                        <div
-                          className={`tc-title ${status === "완료" ? "done" : ""}`}
-                        >
-                          {t.description}
-                        </div>
-                        <span className="tc-diff">
-                          {"★".repeat(t.difficulty ?? 1)}
-                          <span className="tc-diff-off">
-                            {"★".repeat(3 - (t.difficulty ?? 1))}
-                          </span>
-                        </span>
-                      </div>
-                      {t.detail && <div className="tc-detail">{t.detail}</div>}
-                      <div className="tc-foot">
-                        <span className="tc-who">
-                          <span
-                            className={`av ${avOf(t.assignee_id)} av-sm`}
-                            style={{ width: 20, height: 20, fontSize: 9 }}
+                <div className="col-cards">
+                  {colTasks.map((t) => {
+                    const status = API_TO_STATUS[t.status];
+                    const dd = dueState(t.due_date);
+                    const danger = status !== "완료" && dd.danger;
+                    const warn = status !== "완료" && dd.warn;
+                    const who = nameOf(t.assignee_id);
+                    return (
+                      <div
+                        key={t.id}
+                        draggable={canEdit(t)}
+                        className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
+                        style={{
+                          cursor: canEdit(t)
+                            ? draggingId === t.id
+                              ? "grabbing"
+                              : "grab"
+                            : "default",
+                          ...stripeStyle(t.assignee_id, danger, warn),
+                        }}
+                        onDragStart={(e) => {
+                          if (!canEdit(t)) return;
+                          setDraggingId(t.id);
+                          e.dataTransfer.setData("taskId", String(t.id));
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => setDraggingId(null)}
+                        onClick={() => canEdit(t) && openEdit(t)}
+                      >
+                        <div className="tc-head">
+                          <div
+                            className={`tc-title ${status === "완료" ? "done" : ""}`}
                           >
                             {t.description}
                           </div>
@@ -764,6 +710,9 @@ export default function TasksPage() {
                             </span>
                           </span>
                         </div>
+                        {t.detail && (
+                          <div className="tc-detail">{t.detail}</div>
+                        )}
                         <div className="tc-foot">
                           <span className="tc-who">
                             <span
