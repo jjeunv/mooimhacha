@@ -51,8 +51,19 @@ export class TeamSettings {
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 0.5 })
   final_task_weight!: number;
 
+  // 회의 내 발언:출석 가중치 (합 1.0). 종합 기여 = 발언×(1-task)×ws + 출석×(1-task)×wa + 태스크×task
+  @Column({ type: 'decimal', precision: 3, scale: 2, default: 0.6 })
+  weight_speech_in_meeting!: number;
+
+  @Column({ type: 'decimal', precision: 3, scale: 2, default: 0.4 })
+  weight_attend_in_meeting!: number;
+
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 1.0 })
   leader_bonus_multiplier!: number;
+
+  // 지각 기준(분) — 회의 시작 후 이 시간 초과 입장 시 '지각' (출결 표시용, 산정 엔진과 별개)
+  @Column({ type: 'int', default: 5 })
+  late_threshold_minutes!: number;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
   slack_bot_token!: string | null;

@@ -113,9 +113,14 @@ export class ContributionClient {
     const members = await Promise.all(
       payload.members.map(async (m) => {
         const actions = toTaskActions(payload.action_items, m.user_id, now);
-        // 참여한 회의만 누적 입력에 포함 — 저장된 ① 행 기반이던 기존 정책과 동일
+        // 참여한 회의 + 무단결석 회의를 누적 입력에 포함.
+        // 무단결석(absent_user_ids)도 보내야 docs/06 대로 ① = 0 이 누적(②)에 반영된다.
         const rows: ExternalMemberMeetingData[] = payload.meetings
-          .filter((mt) => mt.participant_user_ids.includes(m.user_id))
+          .filter(
+            (mt) =>
+              mt.participant_user_ids.includes(m.user_id) ||
+              mt.absent_user_ids.includes(m.user_id),
+          )
           .map((mt) => {
             const { data } = deriveMemberData(mt, m.user_id);
             // 무효 처리된 회의는 비정규로 보내 누적에서 제외시킨다

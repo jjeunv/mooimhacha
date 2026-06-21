@@ -965,9 +965,9 @@ export default function MeetingPage() {
   );
   return (
     <>
-      <div className="meeting-layout">
+      <div className="meeting-layout" data-tour="mt-layout">
         {/* 사이드바 */}
-        <div className="msidebar">
+        <div className="msidebar" data-tour="mt-sidebar">
           <div className="msb-head">
             <span>회의 목록</span>
             <div style={{ display: "flex", gap: 6 }}>
@@ -982,6 +982,7 @@ export default function MeetingPage() {
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => setModalOpen("meeting")}
+                data-tour="mt-new"
               >
                 <i className="ti ti-plus" />
               </button>
@@ -1537,7 +1538,7 @@ export default function MeetingPage() {
                       출결 현황
                       <span
                         className="info-tip"
-                        data-tip={`회의 시작 후 5분 이내 입장 → 출석\n5분 초과 입장 → 지각\n입장 기록 없음 → 결석`}
+                        data-tip={`회의 시작 후 ${teamSettings?.late_threshold_minutes ?? 5}분 이내 입장 → 출석\n${teamSettings?.late_threshold_minutes ?? 5}분 초과 입장 → 지각\n입장 기록 없음 → 결석`}
                       >
                         <i className="ti ti-info-circle" />
                       </span>

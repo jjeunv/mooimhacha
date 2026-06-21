@@ -45,18 +45,62 @@ export class UpdateTeamSettingsDto {
   @IsEnum(['team', 'self', 'leader'])
   contribution_visibility?: 'team' | 'self' | 'leader';
 
-  @ApiPropertyOptional({ minimum: 1, maximum: 240 })
+  @ApiPropertyOptional({ minimum: 0, maximum: 240 })
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(240)
   min_meeting_minutes?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 1.0,
+    description: '종합에서 태스크 비중',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1.0)
+  final_task_weight?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 1.0,
+    description: '회의 내 발언 가중치 (출석과 합 1.0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1.0)
+  weight_speech_in_meeting?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 1.0,
+    description: '회의 내 출석 가중치 (발언과 합 1.0)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1.0)
+  weight_attend_in_meeting?: number;
 
   @ApiPropertyOptional({ maximum: 1.0 })
   @IsOptional()
   @IsNumber()
   @Max(1.0)
   leader_bonus_multiplier?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: 240,
+    description: '지각 기준(분)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(240)
+  late_threshold_minutes?: number;
 
   @ApiPropertyOptional({ example: 'xoxb-...', description: 'Slack Bot Token' })
   @IsOptional()

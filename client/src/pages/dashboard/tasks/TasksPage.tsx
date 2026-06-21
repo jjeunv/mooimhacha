@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
-import { todayStr, nowTimeStr, timeMinForDate } from "@/lib/dateUtils";
+import { todayStr, timeMinForDate } from "@/lib/dateUtils";
 import { useToast } from "@/hooks/useToast";
 import Modal from "@/components/Modal";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -108,15 +108,17 @@ export default function TasksPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [newDesc, setNewDesc] = useState("");
+  const [newDetail, setNewDetail] = useState("");
   const [newAssignee, setNewAssignee] = useState<string>("");
   const [newDue, setNewDue] = useState(todayStr());
-  const [newTime, setNewTime] = useState(nowTimeStr());
+  const [newTime, setNewTime] = useState("");
   const [newStatus, setNewStatus] = useState<Status>("할 일");
   const [newDifficulty, setNewDifficulty] = useState(2);
 
   // 수정 모달
   const [editTarget, setEditTarget] = useState<ActionItem | null>(null);
   const [editDesc, setEditDesc] = useState("");
+  const [editDetail, setEditDetail] = useState("");
   const [editAssignee, setEditAssignee] = useState("");
   const [editDue, setEditDue] = useState("");
   const [editTime, setEditTime] = useState("");
@@ -244,6 +246,7 @@ export default function TasksPage() {
   function openEdit(task: ActionItem) {
     setEditTarget(task);
     setEditDesc(task.description);
+    setEditDetail(task.detail ?? "");
     setEditAssignee(task.assignee_id ? String(task.assignee_id) : "");
     if (task.due_date) {
       const dt = new Date(task.due_date);
@@ -286,10 +289,53 @@ export default function TasksPage() {
     if (editStatus !== API_TO_STATUS[editTarget.status])
       body.status = STATUS_TO_API[editStatus];
 
-    if (Object.keys(body).length === 0) {
+    // 세부사항은 점수에 영향 없는 메모 → 승인 없이 즉시 반영
+    const detailChanged = editDetail.trim() !== (editTarget.detail ?? "");
+
+    if (!hasChange && !detailChanged) {
       showToast("변경된 항목이 없습니다", "error");
       return;
     }
+    // 점수에 영향 주는 변경(이름·난이도·담당자·마감일)만 팀장 승인 필요
+    if (hasChange && !editReason.trim()) {
+      showToast("수정 사유를 입력해 주세요", "error");
+      return;
+    }
+
+    if (detailChanged) {
+      const nextDetail = editDetail.trim() || null;
+      try {
+        await apiPatch(`/action-items/${editTarget.id}`, {
+          detail: nextDetail,
+        });
+        setTasks((ts) =>
+          ts.map((t) =>
+            t.id === editTarget.id ? { ...t, detail: nextDetail } : t,
+          ),
+        );
+      } catch (e) {
+        showToast((e as Error).message, "error");
+        return;
+      }
+    }
+
+    if (hasChange) {
+      body.reason = editReason.trim();
+      if (extensions.get(editTarget.id)?.status === "pending") {
+        setPendingRequestBody(body);
+        setConfirmOverwrite(true);
+        return;
+      }
+      await doSendRequest(editTarget.id, body);
+      return;
+    }
+
+    // 세부사항만 변경된 경우 — 즉시 반영 후 종료
+    setEditTarget(null);
+    showToast("세부사항을 수정했어요");
+  }
+
+  async function doSendRequest(taskId: number, body: Record<string, unknown>) {
     setEditSaving(true);
     try {
       await apiPatch(`/action-items/${editTarget.id}`, body);
@@ -491,6 +537,7 @@ export default function TasksPage() {
       await apiPost("/action-items", {
         team_id: team.id,
         description: newDesc.trim(),
+        detail: newDetail.trim() || undefined,
         assignee_id: newAssignee ? Number(newAssignee) : undefined,
         due_date: newDue
           ? new Date(`${newDue}T${newTime || "23:59"}`).toISOString()
@@ -500,9 +547,10 @@ export default function TasksPage() {
       });
       setModalOpen(false);
       setNewDesc("");
+      setNewDetail("");
       setNewAssignee("");
       setNewDue(todayStr());
-      setNewTime(nowTimeStr());
+      setNewTime("");
       setNewStatus("할 일");
       setNewDifficulty(2);
       showToast("태스크가 추가되었습니다");
@@ -516,7 +564,7 @@ export default function TasksPage() {
 
   return (
     <div>
-      <div className="task-top">
+      <div className="task-top" data-tour="tk-controls">
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {view !== "history" && (
             <>
@@ -587,6 +635,7 @@ export default function TasksPage() {
           )}
           <button
             className="btn btn-primary btn-sm"
+            data-tour="tk-add"
             onClick={() => setModalOpen(true)}
           >
             <i className="ti ti-plus" /> 태스크 추가
@@ -594,7 +643,7 @@ export default function TasksPage() {
         </div>
       </div>
 
-      <div className="prog-strip">
+      <div className="prog-strip" data-tour="tk-progress">
         <span className="lbl">전체 진행률</span>
         <div className="prog-bg">
           <div
@@ -609,7 +658,7 @@ export default function TasksPage() {
 
       {/* 보드 뷰 */}
       {view === "board" && (
-        <div className="board">
+        <div className="board" data-tour="tk-board">
           {STATUS_COLS.map((col) => {
             const colTasks = filteredTasks.filter(
               (t) => API_TO_STATUS[t.status] === col,
@@ -658,38 +707,53 @@ export default function TasksPage() {
                     {colTasks.length}
                   </span>
                 </div>
-                <div className="col-cards">
-                  {colTasks.map((t) => {
-                    const status = API_TO_STATUS[t.status];
-                    const dd = dueState(t.due_date);
-                    const danger = status !== "완료" && dd.danger;
-                    const warn = status !== "완료" && dd.warn;
-                    const who = nameOf(t.assignee_id);
-                    return (
-                      <div
-                        key={t.id}
-                        draggable={canEdit(t)}
-                        className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
-                        style={{
-                          cursor: canEdit(t)
-                            ? draggingId === t.id
-                              ? "grabbing"
-                              : "grab"
-                            : "default",
-                          ...stripeStyle(t.assignee_id, danger, warn),
-                        }}
-                        onDragStart={(e) => {
-                          if (!canEdit(t)) return;
-                          setDraggingId(t.id);
-                          e.dataTransfer.setData("taskId", String(t.id));
-                          e.dataTransfer.effectAllowed = "move";
-                        }}
-                        onDragEnd={() => setDraggingId(null)}
-                        onClick={() => canEdit(t) && openEdit(t)}
-                      >
-                        <div className="tc-head">
-                          <div
-                            className={`tc-title ${status === "완료" ? "done" : ""}`}
+                {colTasks.map((t) => {
+                  const status = API_TO_STATUS[t.status];
+                  const dd = dueState(t.due_date);
+                  const danger = status !== "완료" && dd.danger;
+                  const warn = status !== "완료" && dd.warn;
+                  const who = nameOf(t.assignee_id);
+                  return (
+                    <div
+                      key={t.id}
+                      draggable={canEdit(t)}
+                      className={`tcard ${danger ? "danger" : ""} ${warn ? "warn" : ""} ${status === "완료" ? "done-card" : ""} ${draggingId === t.id ? "dragging" : ""}`}
+                      style={{
+                        cursor: canEdit(t)
+                          ? draggingId === t.id
+                            ? "grabbing"
+                            : "grab"
+                          : "default",
+                        ...stripeStyle(t.assignee_id, danger, warn),
+                      }}
+                      onDragStart={(e) => {
+                        if (!canEdit(t)) return;
+                        setDraggingId(t.id);
+                        e.dataTransfer.setData("taskId", String(t.id));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragEnd={() => setDraggingId(null)}
+                      onClick={() => canEdit(t) && openEdit(t)}
+                    >
+                      <div className="tc-head">
+                        <div
+                          className={`tc-title ${status === "완료" ? "done" : ""}`}
+                        >
+                          {t.description}
+                        </div>
+                        <span className="tc-diff">
+                          {"★".repeat(t.difficulty ?? 1)}
+                          <span className="tc-diff-off">
+                            {"★".repeat(3 - (t.difficulty ?? 1))}
+                          </span>
+                        </span>
+                      </div>
+                      {t.detail && <div className="tc-detail">{t.detail}</div>}
+                      <div className="tc-foot">
+                        <span className="tc-who">
+                          <span
+                            className={`av ${avOf(t.assignee_id)} av-sm`}
+                            style={{ width: 20, height: 20, fontSize: 9 }}
                           >
                             {t.description}
                           </div>
@@ -815,10 +879,13 @@ export default function TasksPage() {
                   >
                     <i className="ti ti-check" />
                   </div>
-                  <div
-                    className={`lrow-title ${status === "완료" ? "done" : ""}`}
-                  >
-                    {t.description}
+                  <div className="lrow-titlebox">
+                    <div
+                      className={`lrow-title ${status === "완료" ? "done" : ""}`}
+                    >
+                      {t.description}
+                    </div>
+                    {t.detail && <div className="lrow-detail">{t.detail}</div>}
                   </div>
                   <span className={`badge ${COL_BADGE[status] || "b-gray"}`}>
                     {status}
@@ -1043,6 +1110,17 @@ export default function TasksPage() {
               onChange={(e) => setNewDesc(e.target.value)}
             />
           </div>
+          <div className="field">
+            <label className="field-label">세부사항 (선택)</label>
+            <textarea
+              className="input"
+              rows={2}
+              maxLength={2000}
+              placeholder="예) 참고 링크, 작업 범위 등 메모"
+              value={newDetail}
+              onChange={(e) => setNewDetail(e.target.value)}
+            />
+          </div>
           <div className="field-row">
             <div className="field">
               <label className="field-label">담당자</label>
@@ -1153,6 +1231,18 @@ export default function TasksPage() {
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
             />
+          </div>
+          <div className="field">
+            <label className="field-label">세부사항 (선택)</label>
+            <textarea
+              className="input"
+              rows={2}
+              maxLength={2000}
+              placeholder="예) 참고 링크, 작업 범위 등 메모"
+              value={editDetail}
+              onChange={(e) => setEditDetail(e.target.value)}
+            />
+            <div className="field-hint">세부사항은 승인 없이 바로 반영돼요</div>
           </div>
           <div className="field-row">
             <div className="field">

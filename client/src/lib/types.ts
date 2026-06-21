@@ -59,6 +59,7 @@ export interface ActionItem {
   meeting_id: number | null;
   assignee_id: number | null;
   description: string;
+  detail: string | null;
   due_date: string | null;
   completed_at: string | null;
   difficulty: number;
@@ -160,6 +161,7 @@ export interface TeamSettings {
   final_task_weight: number;
   leader_bonus_multiplier: number;
   contribution_visibility: "team" | "leader" | "self";
+  late_threshold_minutes: number;
 }
 
 export interface TeamDetail extends Team {

@@ -84,13 +84,13 @@ export interface ExternalFullPipelineResponse {
 
 // --- 변환 함수 ---
 
-// 우리 팀 설정 → 외부 설정. 발언/참석 가중치는 docs/06 기준 0.6/0.4 를 명시 전달한다
+// 우리 팀 설정 → 외부 설정. 발언/참석 가중치는 팀 설정값(기본 0.6/0.4)을 전달한다
 // (외부 엔진 기본값 0.75/0.25 미사용 — 로컬 폴백 스코어러와 결과 일관성 유지).
 export function mapTeamSettings(s: TeamSettingsPayload): ExternalTeamSettings {
   const curve = s.deadline_penalty_curve ?? 'standard';
   return {
-    weight_speech_in_meeting: 0.6,
-    weight_attend_in_meeting: 0.4,
+    weight_speech_in_meeting: s.weight_speech_in_meeting ?? 0.6,
+    weight_attend_in_meeting: s.weight_attend_in_meeting ?? 0.4,
     weight_task_in_final: s.final_task_weight ?? 0.5,
     punctuality_grace_ratio: s.punctuality_grace_ratio ?? 0.1,
     absence_grace_sec: s.presence_grace_seconds ?? 30,
@@ -216,6 +216,33 @@ export function deriveMemberData(
     },
     rawSpeechRatio: totalChars > 0 ? ownChars / totalChars : null,
   };
+}
+
+// 무단결석(한 번도 입장 X · 승인된 사유결석 아님) 멤버 ID — docs/06: ① = 0, 누적(②)에 포함.
+// 이 멤버들에게도 회의 행(absent 0행)을 생성해 엔진에 보내야 0점이 누적에 반영된다.
+// 비정규·무효 회의는 엔진이 누적서 제외하므로 빈 배열로 둔다.
+export function absentUnexcusedIds(input: {
+  meetingType: string;
+  isInvalidated: boolean;
+  meetingAtMs: number;
+  joinedIds: ReadonlySet<number>;
+  excusedIds: ReadonlySet<number>;
+  activeMemberships: {
+    user_id: number;
+    joinedAtMs: number;
+    deletedAtMs: number | null;
+  }[];
+}): number[] {
+  if (input.meetingType !== 'regular' || input.isInvalidated) return [];
+  const out = new Set<number>();
+  for (const m of input.activeMemberships) {
+    if (m.joinedAtMs > input.meetingAtMs) continue; // 회의 후 합류
+    if (m.deletedAtMs != null && m.deletedAtMs < input.meetingAtMs) continue; // 회의 전 탈퇴
+    if (input.joinedIds.has(m.user_id)) continue; // 입장함 → 무단결석 아님
+    if (input.excusedIds.has(m.user_id)) continue; // 승인된 사유결석 → 보호(제외)
+    out.add(m.user_id);
+  }
+  return [...out];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

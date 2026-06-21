@@ -1,4 +1,5 @@
 import {
+  absentUnexcusedIds,
   deriveMemberData,
   mapTeamSettings,
   toTaskActions,
@@ -13,6 +14,8 @@ const SETTINGS: TeamSettingsPayload = {
   absent_meeting_handling: 'exclude',
   min_meeting_minutes: 5,
   final_task_weight: 0.5,
+  weight_speech_in_meeting: 0.6,
+  weight_attend_in_meeting: 0.4,
   leader_bonus_multiplier: 1.0,
 };
 
@@ -196,6 +199,53 @@ describe('deriveMemberData — 원시 이벤트 → 외부 MemberMeetingData', (
       presence_events: [join(1, 0)],
     });
     expect(deriveMemberData(req, 1).data.is_official).toBe(false);
+  });
+});
+
+describe('absentUnexcusedIds — 무단결석(0점·누적 포함) 멤버 판정', () => {
+  // 회의 시각 = 100. 멤버 1·2·3 모두 그 전부터 활성.
+  const memberships = [
+    { user_id: 1, joinedAtMs: 0, deletedAtMs: null },
+    { user_id: 2, joinedAtMs: 0, deletedAtMs: null },
+    { user_id: 3, joinedAtMs: 0, deletedAtMs: null },
+  ];
+  const base = {
+    meetingType: 'regular',
+    isInvalidated: false,
+    meetingAtMs: 100,
+    joinedIds: new Set<number>(),
+    excusedIds: new Set<number>(),
+    activeMemberships: memberships,
+  };
+
+  it('입장한 멤버는 제외, 입장 안 한 활성 멤버만 무단결석으로 본다', () => {
+    expect(absentUnexcusedIds({ ...base, joinedIds: new Set([1]) })).toEqual([
+      2, 3,
+    ]);
+  });
+
+  it('승인된 사유결석 멤버는 보호 — 무단결석에서 제외', () => {
+    expect(
+      absentUnexcusedIds({
+        ...base,
+        joinedIds: new Set([1]),
+        excusedIds: new Set([2]),
+      }),
+    ).toEqual([3]);
+  });
+
+  it('회의 후 합류·회의 전 탈퇴한 멤버는 그 회의 무단결석 아님', () => {
+    const ms = [
+      { user_id: 1, joinedAtMs: 0, deletedAtMs: null }, // 활성
+      { user_id: 2, joinedAtMs: 200, deletedAtMs: null }, // 회의(100) 후 합류
+      { user_id: 3, joinedAtMs: 0, deletedAtMs: 50 }, // 회의(100) 전 탈퇴
+    ];
+    expect(absentUnexcusedIds({ ...base, activeMemberships: ms })).toEqual([1]);
+  });
+
+  it('비정규·무효 회의는 빈 배열 (엔진이 누적서 제외)', () => {
+    expect(absentUnexcusedIds({ ...base, meetingType: 'adhoc' })).toEqual([]);
+    expect(absentUnexcusedIds({ ...base, isInvalidated: true })).toEqual([]);
   });
 });
 

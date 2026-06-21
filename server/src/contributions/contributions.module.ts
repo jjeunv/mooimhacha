@@ -8,6 +8,7 @@ import { PresenceEvent } from '../entities/presence-event.entity';
 import { AnomalyEvent } from '../entities/anomaly-event.entity';
 import { ActionItem } from '../entities/action-item.entity';
 import { TeamMembership } from '../entities/team-membership.entity';
+import { MeetingAbsence } from '../entities/meeting-absence.entity';
 import { TeamSettings } from '../entities/team-settings.entity';
 import { User } from '../entities/user.entity';
 import { TeamsModule } from '../teams/teams.module';
@@ -26,6 +27,7 @@ import { ContributionClient } from './contribution.client';
       AnomalyEvent,
       ActionItem,
       TeamMembership,
+      MeetingAbsence,
       TeamSettings,
       User,
     ]),

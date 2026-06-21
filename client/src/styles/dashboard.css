@@ -236,6 +236,32 @@
   padding: 0 24px;
   border-bottom: 1px solid var(--border-2);
 }
+/* 대시보드 가이드 재시작 버튼 (헤더 우측) */
+.dash-guide-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface-2);
+  color: var(--text-mut);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    border-color 0.14s ease;
+}
+.dash-guide-btn .ti {
+  font-size: 14px;
+}
+.dash-guide-btn:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
 .main-title {
   font-family: var(--font-display);
   font-size: 18px;
@@ -373,6 +399,15 @@
 }
 .task-mini + .task-mini {
   box-shadow: inset 0 1px 0 var(--border-2);
+}
+/* 할 일 위젯 세부사항(선택 메모) — 1줄 말줄임 */
+.tm-detail {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chk-mini {
   width: 16px;
@@ -1239,7 +1274,8 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0,1fr): nowrap 세부사항이 컬럼을 밀어내지 않도록 최소폭 0 (grid blowout 방지) */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 13px;
 }
 .board-col {
@@ -1328,6 +1364,15 @@
 .tc-title.done {
   text-decoration: line-through;
   color: var(--text-soft);
+}
+/* 카드 세부사항(선택 메모) — 제목 아래 2줄까지 */
+.tc-detail {
+  margin: 4px 0 2px;
+  font-size: 11px;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tc-due {
   flex-shrink: 0;
@@ -1658,14 +1703,26 @@
 .lrow.warn {
   border-left: 3px solid var(--amber);
 }
-.lrow-title {
+.lrow-titlebox {
   flex: 1;
+  min-width: 0;
+}
+.lrow-title {
   font-size: 12.5px;
   font-weight: 600;
 }
 .lrow-title.done {
   text-decoration: line-through;
   color: var(--text-soft);
+}
+/* 목록 세부사항(선택 메모) — 제목 아래 1줄 */
+.lrow-detail {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lrow-due {
   font-size: 11px;
@@ -1679,6 +1736,56 @@
 .report-wrap {
   max-width: 720px;
   margin: 0 auto;
+}
+/* 리포트 잠금(최소 회의 미달) */
+.report-lock {
+  margin-top: 48px;
+  padding: 40px 32px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  text-align: center;
+}
+.report-lock-ic {
+  font-size: 38px;
+  color: var(--text-soft);
+}
+.report-lock-title {
+  margin-top: 12px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+.report-lock-desc {
+  margin: 8px auto 0;
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+.report-lock-bar {
+  margin: 20px auto 0;
+  max-width: 240px;
+  height: 8px;
+  border-radius: 5px;
+  background: var(--track);
+  overflow: hidden;
+}
+.report-lock-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--green);
+}
+.report-lock-count {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--text-soft);
+}
+.report-lock-count b {
+  color: var(--green);
+  font-weight: 800;
 }
 .report-banner {
   border-radius: 18px;
@@ -1738,9 +1845,29 @@
 
 .mrc {
   padding: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 .mrc + .mrc {
   box-shadow: inset 0 1px 0 var(--border-2);
+}
+/* 왼쪽 레이더(1) : 오른쪽 막대(3) */
+.mrc-radar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.mrc-radar svg {
+  width: 100%;
+  max-width: 150px;
+  aspect-ratio: 1 / 1;
+  height: auto;
+}
+.mrc-main {
+  flex: 3;
+  min-width: 0;
 }
 .mrc-head {
   display: flex;
@@ -1827,6 +1954,58 @@
   width: 13px;
   height: 13px;
   border-radius: 4px;
+}
+
+/* 내가 완료한 태스크 목록 */
+/* 난이도 · 이름 · 세부사항 · 기한 4열 — 행마다 동일 간격으로 정렬 */
+.mdt-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) minmax(0, 3fr) 46px;
+  align-items: start;
+  column-gap: 12px;
+  padding: 9px 0;
+  font-size: 12.5px;
+}
+.mdt-row + .mdt-row {
+  box-shadow: inset 0 1px 0 var(--border-2);
+}
+.mdt-head {
+  padding: 0 0 6px;
+}
+.mdt-head span {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.mdt-head span:last-child {
+  text-align: right;
+}
+.mdt-stars {
+  color: var(--amber);
+  font-size: 11px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.mdt-desc {
+  min-width: 0;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mdt-detail {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mdt-date {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .ms-row {

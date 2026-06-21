@@ -26,6 +26,8 @@ const SETTINGS: TeamSettingsPayload = {
   absent_meeting_handling: 'exclude',
   min_meeting_minutes: 5,
   final_task_weight: 0.5,
+  weight_speech_in_meeting: 0.6,
+  weight_attend_in_meeting: 0.4,
   leader_bonus_multiplier: 1.0,
 };
 
@@ -68,6 +70,7 @@ const RAW_MEETING: TeamPipelineRequest['meetings'][number] = {
   is_invalidated: false,
   team_settings: SETTINGS,
   participant_user_ids: [1, 2],
+  absent_user_ids: [],
   utterances: MEETING_REQ.utterances,
   presence_events: MEETING_REQ.presence_events,
   anomaly_events: [],
@@ -266,6 +269,35 @@ describe('ContributionClient — 외부 기여도 API(/pipeline/score) 연동', 
     const body = callBody(fetchMock, 0);
     expect(body.meetings).toHaveLength(1);
     expect(body.meetings[0].is_official).toBe(false);
+  });
+
+  it('②: 무단결석(absent_user_ids) 멤버는 회의 0점 행으로 누적에 포함된다', async () => {
+    fetchMock = mockPipeline(pipelineResponse());
+    const client = makeClient('http://contrib.test');
+
+    await client.computeTeamContributions({
+      ...TEAM_REQ,
+      meetings: [
+        {
+          ...RAW_MEETING,
+          participant_user_ids: [2], // user 1 미입장
+          absent_user_ids: [1], // user 1 무단결석 → 0점 행 포함
+          utterances: [],
+          presence_events: [],
+        },
+      ],
+    });
+
+    const body = callBody(fetchMock, 0);
+    expect(body.meetings).toHaveLength(1);
+    expect(body.meetings[0]).toMatchObject({
+      name: '1',
+      absent: true,
+      actual_attend_sec: 0,
+      own_chars: 0,
+      excused_absence: false,
+      is_official: true, // regular·유효 → 엔진이 meeting_score=0 으로 누적 포함
+    });
   });
 
   it('②: 회의 0건 + 액션 있음 → 누적 제외 운반 행으로 테스크만 산출', async () => {
