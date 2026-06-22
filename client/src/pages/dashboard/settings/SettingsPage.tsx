@@ -211,7 +211,6 @@ export default function SettingsPage() {
       content: {
         title: `${me?.name ?? "팀원"}님이 초대하셨어요 🎉`,
         description: `🏷 ${team.name}\n🔑 초대코드: ${detail.invite_code}`,
-        imageUrl: `${window.location.origin}/icon.png`,
         link: {
           mobileWebUrl: window.location.origin,
           webUrl: window.location.origin,
