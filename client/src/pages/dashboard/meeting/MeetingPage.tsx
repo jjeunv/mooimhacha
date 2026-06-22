@@ -1282,7 +1282,7 @@ export default function MeetingPage() {
                 {tab === "agenda" && (
                   <div className="tab-panel active">
                     {prevDecisions.length > 0 && (
-                      <div style={{ marginBottom: 16 }}>
+                      <div style={{ marginBottom: 22 }}>
                         <div
                           className="panel-label"
                           style={{ marginBottom: 6 }}
@@ -1303,18 +1303,12 @@ export default function MeetingPage() {
                         </div>
                         {prevDecisions.map((d) => (
                           <div key={d.id} className="dec-item">
-                            <div className="dec-ic">
+                            <div className="dec-ic dec-ic--muted">
                               <i className="ti ti-check" />
                             </div>
                             <div className="dec-text">{d.content}</div>
                           </div>
                         ))}
-                        <div
-                          style={{
-                            borderTop: "1px solid var(--border)",
-                            margin: "12px 0 10px",
-                          }}
-                        />
                       </div>
                     )}
                     <div className="panel-label">아젠다 진행</div>
