@@ -490,6 +490,11 @@ export default function SettingsPage() {
       {/* 초대 코드 */}
       <Card icon="ti ti-key" title="초대 코드">
         <div data-tour="st-invite" style={{ padding: "8px 16px 16px" }}>
+          <div
+            style={{ marginBottom: 8, fontSize: 12, color: "var(--text-soft)" }}
+          >
+            이 코드를 팀원에게 공유하면 팀에 합류할 수 있습니다.
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
@@ -531,11 +536,6 @@ export default function SettingsPage() {
                 <i className="ti ti-refresh" /> 재발급
               </button>
             )}
-          </div>
-          <div
-            style={{ marginTop: 8, fontSize: 12, color: "var(--text-soft)" }}
-          >
-            이 코드를 팀원에게 공유하면 팀에 합류할 수 있습니다.
           </div>
         </div>
       </Card>
@@ -1092,6 +1092,17 @@ export default function SettingsPage() {
               </div>
               <div className="field">
                 <label className="field-label">Slack Channel ID</label>
+                <p
+                  style={{
+                    margin: "0 0 6px",
+                    fontSize: 12,
+                    color: "var(--text-soft)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  채널 우클릭 → 채널 세부정보 → 채널 세부정보 보기 → 맨 아래
+                  채널 ID 복사
+                </p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     className="input"
@@ -1113,21 +1124,22 @@ export default function SettingsPage() {
                     저장
                   </button>
                 </div>
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    fontSize: 12,
-                    color: "var(--text-soft)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  채널 우클릭 → 채널 세부정보 → 채널 세부정보 보기 → 맨 아래
-                  채널 ID 복사
-                </p>
               </div>
               {settings.slack_bot_token && (
                 <div className="field">
                   <label className="field-label">연동 테스트</label>
+                  <p
+                    style={{
+                      margin: "0 0 8px",
+                      fontSize: 12,
+                      color: "var(--text-soft)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    채널 ID와 내 Slack User ID를 저장한 뒤 테스트하세요. 버튼
+                    테스트는 DM으로 버튼이 전송되며, 클릭 시 서버 연동을
+                    확인합니다.
+                  </p>
                   <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                     <button
                       className="btn"
@@ -1163,18 +1175,6 @@ export default function SettingsPage() {
                       ? "전송 중…"
                       : "버튼 클릭 테스트 (DM으로 버튼 전송)"}
                   </button>
-                  <p
-                    style={{
-                      margin: "6px 0 0",
-                      fontSize: 12,
-                      color: "var(--text-soft)",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    채널 ID와 내 Slack User ID를 저장한 뒤 테스트하세요. 버튼
-                    테스트는 DM으로 버튼이 전송되며, 클릭 시 서버 연동을
-                    확인합니다.
-                  </p>
                 </div>
               )}
               <hr
