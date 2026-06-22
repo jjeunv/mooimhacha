@@ -347,7 +347,7 @@ export default function OverviewPage() {
             }
             extra={<span className="badge b-green">실시간</span>}
           >
-            <div style={{ padding: "2px 18px 14px" }}>
+            <div className="card-body">
               {derived.endedCount < REQUIRED_MEETINGS ? (
                 <div
                   style={{
@@ -431,7 +431,7 @@ export default function OverviewPage() {
               )
             }
           >
-            <div style={{ padding: "2px 18px 16px" }}>
+            <div className="card-body">
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 3 }}>
                 {focusMeeting?.topic ??
                   (focusMeeting ? "제목 없는 회의" : "예정된 회의 없음")}
@@ -493,7 +493,7 @@ export default function OverviewPage() {
       {/* 미완료 태스크 */}
       <div data-tour="ov-tasks">
         <Card icon="ti ti-checklist" title="미완료 태스크">
-          <div style={{ padding: "2px 16px 14px" }}>
+          <div className="card-body">
             {derived.open.length === 0 && (
               <div style={{ fontSize: 12.5, color: "var(--text-soft)" }}>
                 미완료 태스크가 없습니다.

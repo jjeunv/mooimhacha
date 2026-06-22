@@ -220,6 +220,9 @@ body::after {
   gap: 9px;
   padding: 16px 18px 12px;
 }
+.card-body {
+  padding: 0 18px 16px;
+}
 .card-title {
   font-size: 14px;
   font-weight: 700;
