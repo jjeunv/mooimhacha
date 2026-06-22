@@ -207,13 +207,25 @@ export default function SettingsPage() {
       return;
     }
     window.Kakao.Share.sendDefault({
-      objectType: "text",
-      text: `[무임하차] ${team.name}\n초대코드: ${detail.invite_code}\n${me?.name ?? "팀원"}님이 초대하셨습니다!`,
-      link: {
-        mobileWebUrl: window.location.origin,
-        webUrl: window.location.origin,
+      objectType: "feed",
+      content: {
+        title: `${me?.name ?? "팀원"}님이 초대하셨어요 🎉`,
+        description: `🏷 ${team.name}\n🔑 초대코드: ${detail.invite_code}`,
+        imageUrl: `${window.location.origin}/icon.png`,
+        link: {
+          mobileWebUrl: window.location.origin,
+          webUrl: window.location.origin,
+        },
       },
-      buttonTitle: "무임하차 열기",
+      buttons: [
+        {
+          title: "지금 합류하기",
+          link: {
+            mobileWebUrl: window.location.origin,
+            webUrl: window.location.origin,
+          },
+        },
+      ],
     });
   }
 
