@@ -334,11 +334,11 @@ export default function OverviewPage() {
 
       <div className="dash-grid">
         {/* 기여도 현황 */}
-        {/* align-self:start — 그리드가 행 높이로 늘리면 강조 링이 카드보다 커지므로 콘텐츠 높이에 맞춘다 */}
-        <div data-tour="ov-contrib" style={{ alignSelf: "start" }}>
+        <div data-tour="ov-contrib" style={{ display: "flex" }}>
           <Card
             icon="ti ti-chart-bar"
             title="기여도 현황"
+            style={{ flex: 1 }}
             titleSuffix={
               <span
                 className="live-dot"
