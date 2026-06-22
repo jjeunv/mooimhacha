@@ -1022,6 +1022,10 @@ export default function MeetingPage() {
                       const sum =
                         m.status === "ended" ? summaries.get(m.id) : undefined;
                       const attBadge = sum ? ATT_BADGE[sum.my_status] : null;
+                      // 내가 아직 동의 안 한 결석 사유가 있으면 카드에 ! 표시
+                      // (사이드바 '회의' 메뉴의 ! 와 동일 기준 = pending_count)
+                      const hasTodo =
+                        (summaries.get(m.id)?.pending_count ?? 0) > 0;
                       return (
                         <div
                           key={m.id}
@@ -1033,6 +1037,15 @@ export default function MeetingPage() {
                             <div className="mcard-name">
                               {m.topic ?? "제목 없는 회의"}
                             </div>
+                            {/* 처리할 일(미처리 결석 동의) 있는 회의 표시 */}
+                            {hasTodo && (
+                              <span
+                                className="nav-alert"
+                                title="처리할 일이 있어요"
+                              >
+                                !
+                              </span>
+                            )}
                             {/* 완료 옆에 내 출결 표시 */}
                             {attBadge && (
                               <span
