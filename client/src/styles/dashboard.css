@@ -155,6 +155,15 @@
 
 .sb-members {
   margin-top: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.sb-members::-webkit-scrollbar {
+  display: none;
 }
 .sb-mrow {
   display: flex;
@@ -197,7 +206,7 @@
   min-width: max-content;
 }
 .sb-spacer {
-  flex: 1;
+  flex: 0;
 }
 .sb-user {
   display: flex;
