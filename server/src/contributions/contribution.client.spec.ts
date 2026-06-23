@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ContributionClient } from './contribution.client';
@@ -29,6 +30,8 @@ const SETTINGS: TeamSettingsPayload = {
   weight_speech_in_meeting: 0.6,
   weight_attend_in_meeting: 0.4,
   leader_bonus_multiplier: 1.0,
+  late_threshold_minutes: 5,
+  late_max_minutes: 0,
 };
 
 const MEETING_REQ: MeetingScoreRequest = {
